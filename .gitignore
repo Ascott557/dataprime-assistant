@@ -1,0 +1,192 @@
+# 🚀 DataPrime Assistant - .gitignore
+
+# Environment Variables (CRITICAL: Never commit secrets!)
+.env
+.env.local
+.env.production
+.env.development
+*.env
+
+# API Keys and Secrets
+config.yaml
+config.json
+secrets.txt
+secrets.json
+api_keys.txt
+*.key
+*.secret
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+.env/
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Flask
+instance/
+.webassets-cache
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# poetry
+poetry.lock
+
+# celery beat schedule file
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# pytype static type analyzer
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# Logs
+*.log
+logs/
+log/
+
+# Temporary files
+tmp/
+temp/
+.tmp/
+
+# Docker
+docker-compose.override.yml
+.dockerignore
+
+# Node.js (if any frontend dependencies)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# AI/ML specific
+models/
+*.pkl
+*.model
+*.h5
+*.pb
+*.ckpt
+*.safetensors
+
+# Data files (keep small examples, exclude large datasets)
+data/raw/
+data/processed/
+*.csv
+*.parquet
+*.json
+!data/examples/*.json
+
+# OpenTelemetry
+.otel/
+
+# Local database files
+*.db
+*.sqlite
+*.sqlite3
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Project specific
+# Add any specific files/directories you want to ignore for this project
+
+# Internal documentation and advocacy materials (keep private)
+DEMO_GUIDE.md
+QUICK_START.md
+BLOG_POST_TEMPLATE.md
+CORALOGIX_DASHBOARD_GUIDE.md
+DEVELOPER_ADVOCACY_GUIDE.md
+EXECUTIVE_SUMMARY.md
+LESSONS_LEARNED.md
+README_ADVOCACY.md
+WORKSHOP_TUTORIAL.md
+
+# Keep only README.md for public GitHub repository 
