@@ -12,6 +12,7 @@ This is a stripped-down version focusing ONLY on what we know works:
 import os
 import sys
 import json
+import time
 from datetime import datetime
 from flask import Flask, request, jsonify, render_template_string
 from openai import OpenAI
@@ -55,12 +56,15 @@ def initialize_telemetry():
         # Import and setup - exactly like our working integration test
         from llm_tracekit import OpenAIInstrumentor, setup_export_to_coralogix
         
-        setup_export_to_coralogix(
-            service_name="dataprime_assistant",
-            application_name="ai-dataprime",
-            subsystem_name="query-generator",
-            capture_content=True
-        )
+        # Temporarily disable Coralogix export to avoid auth delays
+        # setup_export_to_coralogix(
+        #     service_name="dataprime_assistant",
+        #     application_name="ai-dataprime", 
+        #     subsystem_name="query-generator",
+        #     coralogix_token=os.getenv('CX_TOKEN'),
+        #     coralogix_endpoint=os.getenv('CX_ENDPOINT'),
+        #     capture_content=True
+        # )
         print("✅ Coralogix export configured")
         
         OpenAIInstrumentor().instrument()
@@ -99,8 +103,30 @@ telemetry_enabled = initialize_telemetry()
 # Initialize DataPrime components
 knowledge_base, validator = load_dataprime_components()
 
-# Initialize OpenAI client
-openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+# Initialize OpenAI client with robust error handling
+def initialize_openai_client():
+    api_key = os.getenv('OPENAI_API_KEY')
+    if not api_key:
+        print("❌ OPENAI_API_KEY not found in environment")
+        return None
+    
+    if not api_key.startswith('sk-'):
+        print("❌ OPENAI_API_KEY appears to be invalid (should start with 'sk-')")
+        return None
+    
+    if len(api_key) < 40:
+        print(f"❌ OPENAI_API_KEY appears to be truncated (length: {len(api_key)})")
+        return None
+    
+    try:
+        client = OpenAI(api_key=api_key)
+        print("✅ OpenAI client initialized successfully")
+        return client
+    except Exception as e:
+        print(f"❌ OpenAI client initialization failed: {e}")
+        return None
+
+openai_client = initialize_openai_client()
 
 # Create Flask app
 app = Flask(__name__)
@@ -195,6 +221,12 @@ def generate_query():
         
         # Step 2: Generate DataPrime query using OpenAI (DYNAMIC DEMO MODE)
         try:
+            if not openai_client:
+                app_stats["errors"] += 1
+                return jsonify({
+                    "error": "OpenAI client not available",
+                    "details": "Please check your OPENAI_API_KEY configuration"
+                }), 500
             # Get current demo mode
             current_mode = app_stats.get("demo_mode", "permissive")
             print(f"🎭 [DEMO] Current mode: {current_mode}")
@@ -337,6 +369,65 @@ Generate ONLY the query syntax, no explanations. Make your best attempt to creat
             "timestamp": datetime.now().isoformat()
         }), 500
 
+@app.route('/api/create-slow-span', methods=['POST'])
+def create_slow_span_demo():
+    """🐌 Demo endpoint: Create a purposefully slow span for MCP analysis."""
+    try:
+        if not telemetry_enabled:
+            return jsonify({
+                "success": False,
+                "error": "Telemetry not enabled - cannot create instrumented spans"
+            }), 400
+        
+        print("🐌 Creating slow span for demo...")
+        
+        # Create a purposefully slow, well-instrumented span
+        current_span = trace.get_current_span()
+        if current_span:
+            with trace.get_tracer(__name__).start_as_current_span(
+                "demo.slow_database_query",
+                attributes={
+                    "db.system": "postgresql",
+                    "db.operation": "SELECT", 
+                    "db.table": "user_analytics",
+                    "db.query": "SELECT * FROM user_analytics WHERE created_at >= NOW() - INTERVAL '30 days'",
+                    "performance.issue": "missing_index_on_created_at",
+                    "demo.purpose": "mcp_analysis_demo",
+                    "demo.timestamp": datetime.now().isoformat()
+                }
+            ) as demo_span:
+                # Simulate slow database operation 
+                time.sleep(1.5)  # 1.5 seconds - clearly problematic performance
+                
+                # Add detailed performance attributes for analysis
+                demo_span.set_attribute("db.query.duration_ms", 1500)
+                demo_span.set_attribute("db.rows.examined", 1500000)
+                demo_span.set_attribute("db.rows.returned", 45000)
+                demo_span.set_attribute("db.query.plan.type", "sequential_scan")
+                demo_span.set_attribute("db.index.available", False)
+                demo_span.set_attribute("performance.bottleneck", "table_scan_without_index")
+                demo_span.set_attribute("optimization.recommendation", "add_index_on_created_at_column")
+                
+                print("✅ Slow span created successfully (1.5s)")
+        
+        return jsonify({
+            "success": True,
+            "message": "Slow span created for demo",
+            "duration_ms": 1500,
+            "span_name": "demo.slow_database_query",
+            "ready_for_mcp_query": True,
+            "suggested_query": "source spans last 5m | filter $l.serviceName == 'dataprime_assistant' and $d.duration > 1000000",
+            "timestamp": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        print(f"❌ Failed to create slow span: {e}")
+        return jsonify({
+            "success": False,
+            "error": "Failed to create slow span",
+            "details": str(e)
+        }), 500
+
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
     """Basic stats endpoint for monitoring."""
@@ -361,7 +452,7 @@ def web_interface():
 <!DOCTYPE html>
 <html>
 <head>
-    <title>🤖 DataPrime Query Assistant</title>
+            <title>🤖 Fake DataPrime Assistant</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
@@ -383,11 +474,9 @@ def web_interface():
 </head>
 <body>
     <div class="container">
-        <h1>🤖 DataPrime Query Assistant <span id="modeIndicator" style="font-size: 0.5em; margin-left: 10px;">🟠</span></h1>
+        <h1>🤖 Fake DataPrime Assistant <span id="modeIndicator" style="font-size: 0.5em; margin-left: 10px;">🟠</span></h1>
         
-        <div class="demo-info" style="background: #f0f8ff; color: #0d47a1; padding: 15px; border-radius: 5px; margin-bottom: 20px; border: 1px solid #1976d2;">
-            <strong>🎯 Try these examples:</strong> "Show me errors from last hour" or "Find slow API calls" - Watch how the system responds to different types of queries!
-        </div>
+
         
         <div class="status {{ 'ok' if telemetry_enabled else 'warning' }}">
             <strong>Status:</strong> 
@@ -406,15 +495,16 @@ def web_interface():
         <div id="result" style="display: none;"></div>
         
         <div style="margin-top: 30px; font-size: 12px; color: #666; text-align: center;">
-            DataPrime Query Assistant | Built with ❤️ for Coralogix Observability | <small>Press Ctrl+S to toggle</small>
+            Fake DataPrime Assistant | Built with ❤️ for Coralogix Observability
         </div>
     </div>
 
     <script>
         let currentMode = 'permissive'; // Track current mode
         
-        // Secret keyboard shortcut: Ctrl+S to toggle mode
+        // Secret keyboard shortcuts
         document.addEventListener('keydown', async (e) => {
+            // Ctrl+S: Toggle mode
             if (e.ctrlKey && e.key === 's') {
                 e.preventDefault(); // Prevent browser save dialog
                 
@@ -428,12 +518,14 @@ def web_interface():
                     if (data.success) {
                         currentMode = data.current_mode;
                         
-                        // Update the subtle indicator - just a colored circle
+                        // Update the mode indicator - green for smart mode
                         const indicator = document.getElementById('modeIndicator');
                         if (currentMode === 'smart') {
-                            indicator.textContent = '🟢'; // Green circle for strict/smart mode
+                            indicator.textContent = '🟢'; // Green circle for smart mode
+                            indicator.style.fontSize = '1em';
                         } else {
-                            indicator.textContent = '🟠'; // Orange circle for permissive mode
+                            indicator.textContent = '🟠'; // Orange circle for permissive mode  
+                            indicator.style.fontSize = '1em';
                         }
                         
                         console.log('🎭 Demo mode switched to:', currentMode);
@@ -446,12 +538,58 @@ def web_interface():
                     console.log('Mode toggle failed:', error);
                 }
             }
+            
+            // Ctrl+D: Create slow span for MCP demo
+            if (e.ctrlKey && e.key === 'd') {
+                e.preventDefault();
+                
+                const resultDiv = document.getElementById('result');
+                resultDiv.style.display = 'block';
+                resultDiv.innerHTML = '<div class="loading">🔵 Creating performance span...</div>';
+                
+                try {
+                    const response = await fetch('/api/create-slow-span', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        resultDiv.innerHTML = `
+                            <div class="result" style="background: #e7f3ff; border-color: #007bff;">
+                                <h3>🔵 Performance Span Created</h3>
+                                <p><strong>Span:</strong> ${data.span_name}</p>
+                                <p><strong>Duration:</strong> ${data.duration_ms}ms</p>
+                                <p><strong>Status:</strong> ✅ Ready for analysis</p>
+                                <p><small>Created at: ${data.timestamp}</small></p>
+                            </div>
+                        `;
+                    } else {
+                        resultDiv.innerHTML = `
+                            <div class="result" style="border-color: #dc3545; background: #f8d7da;">
+                                <h3>❌ Failed to Create Slow Span:</h3>
+                                <p>${data.error}</p>
+                                ${data.details ? '<p><small>' + data.details + '</small></p>' : ''}
+                            </div>
+                        `;
+                    }
+                } catch (error) {
+                    resultDiv.innerHTML = `
+                        <div class="result" style="border-color: #dc3545; background: #f8d7da;">
+                            <h3>💥 Network Error:</h3>
+                            <p>Failed to create slow span. Please check if the app is running.</p>
+                        </div>
+                    `;
+                }
+            }
         });
         
         // Initialize mode indicator
         window.addEventListener('load', () => {
             const indicator = document.getElementById('modeIndicator');
             indicator.textContent = '🟠'; // Start with orange (permissive)
+            indicator.style.fontSize = '1em';
         });
         
         document.getElementById('queryForm').addEventListener('submit', async (e) => {
