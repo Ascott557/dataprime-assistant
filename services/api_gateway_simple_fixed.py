@@ -39,9 +39,10 @@ gateway_stats = {
     "requests": 0,
     "errors": 0,
     "start_time": datetime.now(),
-    "demo_mode": "enterprise",  # Default to enterprise mode for distributed demo
+    "demo_mode": "permissive",  # Default to permissive mode (matches Query Service)
     "slow_spans_created": 0,
-    "slow_db_operations": 0
+    "slow_db_operations": 0,
+    "slow_mode_enabled": False  # Flag for slow database demo through normal journey
 }
 
 def validate_w3c_trace_id(trace_id_str):
@@ -237,7 +238,9 @@ def extract_and_attach_trace_context():
 def health_check():
     """Health check endpoint."""
     # Extract incoming trace context
-    incoming_context = extract_trace_context()
+    propagator = TraceContextTextMapPropagator()
+    headers = dict(request.headers)
+    incoming_context = propagator.extract(headers)
     token = None
     if incoming_context:
         token = context.attach(incoming_context)
@@ -306,7 +309,15 @@ def generate_query():
                     return jsonify({"success": False, "error": "Missing user_input"}), 400
                 
                 user_input = data['user_input']
+                slow_mode = data.get('slow_mode', False) or gateway_stats.get("slow_mode_enabled", False)
+                
                 span.set_attribute("user.input", user_input)
+                span.set_attribute("slow_mode.enabled", slow_mode)
+                
+                # Reset slow mode flag after use
+                if gateway_stats.get("slow_mode_enabled", False):
+                    gateway_stats["slow_mode_enabled"] = False
+                    print("🐌 Using slow database mode for this query")
                 
                 # Call Query Service
                 with tracer.start_as_current_span("api_gateway.call_query_service") as query_span:
@@ -363,7 +374,7 @@ def generate_query():
                 span.set_attribute("ai.task_type", "query_translation")
                 
                 # Demo mode context
-                current_mode = gateway_stats.get("demo_mode", "enterprise")
+                current_mode = gateway_stats.get("demo_mode", "permissive")
                 span.set_attribute("demo.mode", current_mode)
                 span.set_attribute("demo.distributed_system", True)
                 
@@ -401,7 +412,41 @@ def generate_query():
                         # Don't fail the main request if background processing fails
                         background_job = {"error": str(e), "status": "failed"}
                 
+                # Step 4: Slow database demo if enabled (simulates database bottleneck)
+                slow_db_result = None
+                if slow_mode:
+                    with tracer.start_as_current_span("api_gateway.slow_database_demo") as slow_span:
+                        slow_span.set_attribute("downstream.service", "storage_service")
+                        slow_span.set_attribute("demo.type", "slow_database_bottleneck")
+                        
+                        headers = propagate_trace_context()
+                        
+                        try:
+                            slow_db_response = requests.post(
+                                f"{STORAGE_SERVICE_URL}/demo/slow-db",
+                                json={"simulate_slow": True, "demo_context": "normal_user_journey"},
+                                headers=headers,
+                                timeout=30
+                            )
+                            
+                            if slow_db_response.status_code == 200:
+                                slow_db_result = slow_db_response.json()
+                                slow_span.set_attribute("slow_db.success", True)
+                                slow_span.set_attribute("slow_db.duration", slow_db_result.get("performance_analysis", {}).get("total_duration", "unknown"))
+                                print(f"🐌 Slow database demo completed in normal user journey")
+                            else:
+                                slow_span.set_attribute("slow_db.error", "Failed to execute slow database demo")
+                                
+                        except Exception as e:
+                            slow_span.record_exception(e)
+                            slow_db_result = {"error": str(e), "status": "failed"}
+                            print(f"⚠️ Slow database demo failed: {e}")
+                
                 # Combine results with enterprise complexity
+                services_called = ["query_service", "validation_service", "queue_worker_service"]
+                if slow_mode and slow_db_result:
+                    services_called.append("storage_service")
+                
                 final_result = {
                     "success": True,
                     "query": query_result.get("query", ""),
@@ -409,8 +454,9 @@ def generate_query():
                     "intent_confidence": query_result.get("intent_confidence", 0.0),
                     "validation": validation_result,
                     "background_processing": background_job,
-                    "demo_mode": "enterprise",
-                    "services_called": ["query_service", "validation_service", "queue_worker_service"],
+                    "demo_mode": current_mode,
+                    "slow_mode_enabled": slow_mode,
+                    "services_called": services_called,
                     "enterprise_pattern": "API → Queue → External APIs → Database",
                     # Add trace debugging info
                     "trace_type": "root" if is_root else "child",
@@ -418,6 +464,10 @@ def generate_query():
                     "span_id": format(span.get_span_context().span_id, '016x'),  # For frontend chaining
                     "is_root_span": is_root
                 }
+                
+                # Add slow database results if available
+                if slow_mode and slow_db_result:
+                    final_result["slow_database_demo"] = slow_db_result
                 
                 span.set_attribute("response.success", True)
                 span.set_attribute("response.query_length", len(final_result["query"]))
@@ -613,9 +663,25 @@ def toggle_demo_mode():
             span.set_attribute("service.component", "api_gateway")
             span.set_attribute("operation.name", "toggle_demo_mode")
             
-            current_mode = gateway_stats.get("demo_mode", "enterprise")
-            new_mode = "permissive" if current_mode == "enterprise" else "enterprise"
+            current_mode = gateway_stats.get("demo_mode", "permissive")
+            new_mode = "smart" if current_mode == "permissive" else "permissive"
             gateway_stats["demo_mode"] = new_mode
+            
+            # Propagate to Query Service
+            try:
+                query_service_response = requests.post(
+                    f"{QUERY_SERVICE_URL}/api/set-mode",
+                    json={"mode": new_mode},
+                    timeout=5
+                )
+                
+                span.set_attribute("query_service.mode_update.success", query_service_response.status_code == 200)
+                
+                print(f"🔧 Mode propagated to Query Service: {new_mode}")
+                
+            except Exception as e:
+                span.set_attribute("query_service.mode_update.error", str(e))
+                print(f"⚠️ Failed to propagate mode to Query Service: {e}")
             
             span.set_attribute("demo.previous_mode", current_mode)
             span.set_attribute("demo.new_mode", new_mode)
@@ -627,6 +693,35 @@ def toggle_demo_mode():
                 "previous_mode": current_mode,
                 "current_mode": new_mode,
                 "message": f"Demo mode is now {new_mode}",
+                "service": "api_gateway",
+                "timestamp": datetime.now().isoformat()
+            })
+            
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "service": "api_gateway"
+        }), 500
+
+@app.route('/api/enable-slow-mode', methods=['POST'])
+def enable_slow_mode():
+    """Enable slow database mode for next query."""
+    try:
+        with tracer.start_as_current_span("api_gateway.enable_slow_mode") as span:
+            span.set_attribute("service.component", "api_gateway")
+            span.set_attribute("operation.name", "enable_slow_mode")
+            
+            # Set a flag that the next query should use slow mode
+            gateway_stats["slow_mode_enabled"] = True
+            
+            span.set_attribute("slow_mode.enabled", True)
+            
+            print("🐌 Slow database mode enabled for next query")
+            
+            return jsonify({
+                "success": True,
+                "message": "Slow database mode enabled for next query",
                 "service": "api_gateway",
                 "timestamp": datetime.now().isoformat()
             })

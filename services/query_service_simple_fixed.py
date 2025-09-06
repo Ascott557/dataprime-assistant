@@ -48,6 +48,13 @@ openai_initialized = initialize_openai()
 # Initialize Flask app
 app = Flask(__name__)
 
+# Global state for demo mode (matches API Gateway)
+app_stats = {
+    "demo_mode": "permissive",  # Default to permissive
+    "queries_processed": 0,
+    "evaluations_applied": 0
+}
+
 def extract_and_attach_trace_context():
     """Extract trace context and determine if we should create root or child span."""
     propagator = TraceContextTextMapPropagator()
@@ -147,7 +154,11 @@ def generate_query():
             data = request.get_json()
             user_input = data.get('user_input', '')
             
+            # Get current demo mode
+            current_mode = app_stats.get("demo_mode", "permissive")
+            
             span.set_attribute("user.input", user_input)
+            span.set_attribute("evaluation.mode", current_mode)
             
             if not openai_client:
                 # Fallback to simulated processing if OpenAI not available
@@ -156,20 +167,52 @@ def generate_query():
                 query = "source logs | filter $l.severity == ERROR | limit 100"
                 intent = "simulated_query"
                 confidence = 0.75
+                is_rejected = False
             else:
+                # EVALUATION ENGINE - exactly like minimal app
+                if current_mode == "smart":
+                    # Smart mode: restricted to observability topics
+                    system_prompt = """You are an expert in converting observability questions into DataPrime query language.
+You help users analyze logs, traces, and metrics for system monitoring and troubleshooting.
+Generate ONLY the raw query syntax with NO markdown formatting, code blocks, or explanations.
+
+Examples:
+source logs | last 1h | filter service == 'frontend'
+source logs | last 24h | filter $l.severity == ERROR | limit 100
+source spans | last 30m | filter operation_name == 'api_call' | group by service_name
+source logs | last 6h | filter $d.message contains 'timeout' | count by service
+
+Return only the DataPrime query as plain text. Do not use backticks, code blocks, or any markdown formatting.
+
+If the question is not related to system observability, logs, errors, or monitoring, 
+respond with: "This question is not related to system observability or log analysis."""
+                    
+                    span.set_attribute("evaluation.policy", "observability_only")
+                    span.set_attribute("evaluation.enforcement", "strict")
+                    
+                else:
+                    # Permissive mode: accepts any topic
+                    system_prompt = """You are an expert in converting any user question into DataPrime query language syntax.
+Always generate a query using proper DataPrime syntax, regardless of the topic.
+Generate ONLY the raw query syntax with NO markdown formatting, code blocks, or explanations.
+
+Examples:
+source logs | last 1h | filter service == 'frontend'
+source logs | last 24h | filter $l.severity == ERROR | limit 100
+source spans | last 30m | filter operation_name == 'api_call' | group by service_name
+source logs | last 6h | filter $d.message contains 'timeout' | count by service
+
+Return only the DataPrime query as plain text. Do not use backticks, code blocks, or any markdown formatting.
+Make your best attempt to create a valid DataPrime query for any input."""
+                    
+                    span.set_attribute("evaluation.policy", "permissive")
+                    span.set_attribute("evaluation.enforcement", "none")
+                
                 # REAL OpenAI API call - this will be traced by LLM_tracekit
                 with tracer.start_as_current_span("query_service.openai_call") as openai_span:
                     openai_span.set_attribute("ai.operation.name", "chat.completions")
                     openai_span.set_attribute("ai.request.model", "gpt-4o")
-                    
-                    system_prompt = """You are an expert DataPrime query generator. 
-Generate ONLY the DataPrime query syntax, no explanations. 
-Convert natural language into DataPrime queries for log analysis.
-
-Examples:
-- "Show me errors" → source logs | filter $l.severity == ERROR | limit 100
-- "Performance issues" → source logs | filter $d.response_time > 1000 | limit 50
-- "Last hour" → source logs | filter $m.timestamp > now() - 1h | limit 100"""
+                    openai_span.set_attribute("evaluation.mode", current_mode)
                     
                     # This OpenAI call will be automatically instrumented by llm_tracekit
                     response = openai_client.chat.completions.create(
@@ -184,8 +227,20 @@ Examples:
                     
                     query = response.choices[0].message.content.strip()
                     
+                    # Clean up any markdown formatting that might have slipped through
+                    import re
+                    query = re.sub(r'^```[\w]*\n?', '', query)  # Remove opening code blocks
+                    query = re.sub(r'\n?```$', '', query)      # Remove closing code blocks
+                    query = query.strip()
+                    
+                    # Check if query was rejected due to evaluation
+                    is_rejected = "not related to system observability" in query.lower()
+                    
                     # Add AI-specific attributes for Coralogix AI Center
                     openai_span.set_attribute("ai.response.content", query[:100])
+                    openai_span.set_attribute("evaluation.query_rejected", is_rejected)
+                    openai_span.set_attribute("evaluation.rejection_reason", "non_observability_topic" if is_rejected else "none")
+                    
                     if hasattr(response, 'usage') and response.usage:
                         openai_span.set_attribute("ai.usage.prompt_tokens", response.usage.prompt_tokens)
                         openai_span.set_attribute("ai.usage.completion_tokens", response.usage.completion_tokens)
@@ -194,6 +249,10 @@ Examples:
                 # Classify intent for demo purposes
                 intent = "error_analysis" if "error" in user_input.lower() else "general_query"
                 confidence = 0.85
+                
+                app_stats["queries_processed"] += 1
+                if current_mode == "smart":
+                    app_stats["evaluations_applied"] += 1
             
             result = {
                 "success": True,
@@ -203,12 +262,18 @@ Examples:
                 "model_used": "gpt-4o" if openai_client else "simulated",
                 "service": "query_service",
                 "ai_processing": bool(openai_client),  # Flag for AI Center
+                "evaluation": {
+                    "mode": current_mode,
+                    "rejected": is_rejected if openai_client else False,
+                    "reason": "non_observability_topic" if (openai_client and is_rejected) else None
+                },
                 "timestamp": datetime.now().isoformat()
             }
             
             span.set_attribute("query.generated", query)
             span.set_attribute("query.intent", intent)
             span.set_attribute("query.confidence", confidence)
+            span.set_attribute("evaluation.query_rejected", is_rejected if openai_client else False)
             
             return jsonify(result)
             
@@ -222,6 +287,31 @@ Examples:
         if token:
             context.detach(token)
 
+@app.route('/api/get-mode', methods=['GET'])
+def get_current_mode():
+    """Get current demo mode."""
+    return jsonify({
+        "current_mode": app_stats.get("demo_mode", "permissive"),
+        "stats": app_stats
+    })
+
+@app.route('/api/set-mode', methods=['POST'])
+def set_mode():
+    """Set demo mode (called by API Gateway)."""
+    try:
+        data = request.get_json()
+        new_mode = data.get('mode', 'permissive')
+        app_stats["demo_mode"] = new_mode
+        
+        print(f"🔧 Query Service mode changed to: {new_mode}")
+        
+        return jsonify({
+            "success": True,
+            "current_mode": new_mode
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/health', methods=['GET'])
 def health():
     """Health check endpoint."""
@@ -231,6 +321,7 @@ def health():
         "telemetry_initialized": telemetry_enabled,  # Report actual telemetry status
         "openai_initialized": openai_initialized,
         "ai_center_ready": telemetry_enabled and openai_initialized,
+        "demo_mode": app_stats.get("demo_mode", "permissive"),
         "timestamp": datetime.now().isoformat()
     })
 

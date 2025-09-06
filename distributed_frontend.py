@@ -198,24 +198,25 @@ def index():
 </head>
 <body>
     <div class="container">
-        <h1>🚀 Distributed DataPrime Assistant</h1>
+        <!-- Mode Indicator -->
+        <div style="position: absolute; top: 20px; right: 20px;">
+            <div id="modeIndicator" style="
+                width: 20px; height: 20px; 
+                border-radius: 50%; 
+                background: #ffc107; 
+                border: 3px solid white; 
+                box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+                transition: all 0.3s ease;
+            " title="System Status"></div>
+        </div>
+        
+        <h1>🚀 DataPrime Assistant</h1>
         
         <div class="status">
             ✅ <strong>Enterprise Distributed System Active</strong><br>
             This frontend connects to the API Gateway which orchestrates 6 microservices with proper distributed tracing.
         </div>
         
-        <div class="service-info">
-            <strong>🏗️ Architecture:</strong> API Gateway → Query Service → Validation Service → Queue Service → Processing Service → Storage Service
-            <div class="service-list">
-                <div class="service-item">🌐 API Gateway (5000)</div>
-                <div class="service-item">🧠 Query Service (5001)</div>
-                <div class="service-item">✅ Validation Service (5002)</div>
-                <div class="service-item">📬 Queue Service (5003)</div>
-                <div class="service-item">⚙️ Processing Service (5004)</div>
-                <div class="service-item">💾 Storage Service (5005)</div>
-            </div>
-        </div>
         
         <form id="queryForm">
             <div class="form-group">
@@ -230,9 +231,7 @@ def index():
         <div id="result" style="display: none;"></div>
         
         <div style="margin-top: 30px; font-size: 12px; color: #666; text-align: center;">
-            Distributed DataPrime Assistant | Enterprise Architecture Demo<br>
-            <span style="font-size: 10px; opacity: 0.7;">🔍 Check Coralogix for single root span traces across all 8 services</span><br>
-            <span style="font-size: 10px; opacity: 0.7;">💡 Demo shortcuts: Ctrl+S (toggle mode), Ctrl+D (slow database demo), Ctrl+B (slow database)</span>
+            DataPrime Assistant | Enterprise Architecture Demo
         </div>
     </div>
 
@@ -247,7 +246,7 @@ def index():
         window.sessionSpanId = null;
         window.currentTraceId = null;
         window.sessionStartTime = null;
-        window.currentMode = 'enterprise'; // Track current demo mode
+        window.currentMode = 'permissive'; // Track current demo mode
     </script>
     
     <script>
@@ -381,16 +380,40 @@ def index():
                 }
                 
                 if (data.success) {
-                    // Store query operation span ID for chaining feedback
-                    if (data.span_id) {
-                        storeOperationSpanId(data.span_id, 'query');
-                    } else {
-                        // Fallback: generate span ID for chaining
-                        storeOperationSpanId(generateSpanId(), 'query');
-                    }
+                    // Check if this is an evaluation rejection by Coralogix AI Center
+                    const isRejected = data.query && data.query.includes("not related to system observability");
                     
-                    currentQuery = data.query;
-                    displayResult(data, userInput);
+                    if (isRejected) {
+                        // Display clean rejection for customer demo
+                        resultDiv.innerHTML = `
+                            <div class="result" style="border-color: #dc3545; background: #f8d7da; color: #721c24;">
+                                <h3>❌ Query Not Supported</h3>
+                                <p><strong>Your question:</strong> "${userInput}"</p>
+                                <p>This query is not associated with DataPrime or log analysis.</p>
+                                
+                                <div style="margin-top: 15px; padding: 10px; background: #fff5f5; border-radius: 5px; border-left: 4px solid #dc3545;">
+                                    <strong>💡 Suggested Queries</strong>
+                                    <p style="margin: 5px 0;"><strong>Try asking:</strong></p>
+                                    <ul style="margin: 5px 0; padding-left: 20px;">
+                                        <li>"Show me errors from the last hour"</li>
+                                        <li>"Find slow API calls with high response times"</li>
+                                        <li>"Count logs by service and severity"</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        `;
+                    } else {
+                        // Store query operation span ID for chaining feedback
+                        if (data.span_id) {
+                            storeOperationSpanId(data.span_id, 'query');
+                        } else {
+                            // Fallback: generate span ID for chaining
+                            storeOperationSpanId(generateSpanId(), 'query');
+                        }
+                        
+                        currentQuery = data.query;
+                        displayResult(data, userInput);
+                    }
                 } else {
                     resultDiv.innerHTML = `<div style="color: #e53e3e; padding: 15px; background: #fed7d7; border-radius: 8px;">
                         <strong>❌ Error:</strong> ${data.error || 'Unknown error occurred'}
@@ -431,6 +454,7 @@ def index():
                         ${data.validation.warnings && data.validation.warnings.length > 0 ? 
                             `Warnings: ${data.validation.warnings.join(', ')}` : ''}
                     </div>
+                    
                     
                     ${createFeedbackSection()}
                 </div>
@@ -591,7 +615,7 @@ def index():
         
         // Demo keyboard shortcuts
         document.addEventListener('keydown', async function(e) {
-            // Ctrl+S: Toggle demo mode
+            // Ctrl+S: Toggle demo mode with visual feedback
             if (e.ctrlKey && e.key === 's') {
                 e.preventDefault(); // Prevent browser save dialog
                 
@@ -605,17 +629,33 @@ def index():
                     if (data.success) {
                         currentMode = data.current_mode;
                         
-                        // Show mode change notification
+                        // Update visual indicator
+                        const indicator = document.getElementById('modeIndicator');
+                        
+                        if (currentMode === 'smart') {
+                            indicator.style.background = '#28a745'; // Green for smart mode
+                            indicator.title = 'System Status';
+                        } else {
+                            indicator.style.background = '#ffc107'; // Orange for permissive
+                            indicator.title = 'System Status';
+                        }
+                        
+                        // Show brief system status notification
                         const resultDiv = document.getElementById('result');
                         resultDiv.style.display = 'block';
                         resultDiv.innerHTML = `
-                            <div class="result" style="background: #e7f3ff; border-color: #007bff;">
-                                <h3>🎭 Demo Mode Changed</h3>
-                                <p><strong>Previous:</strong> ${data.previous_mode}</p>
-                                <p><strong>Current:</strong> ${data.current_mode}</p>
-                                <p><small>Mode affects query generation behavior in the distributed system</small></p>
+                            <div class="result" style="background: #f8f9fa; border-color: #dee2e6;">
+                                <h3>⚙️ System Configuration Updated</h3>
+                                <p><small>Ready for query processing</small></p>
                             </div>
                         `;
+                        
+                        // Auto-hide notification after 2 seconds
+                        setTimeout(() => {
+                            if (resultDiv.innerHTML.includes('System Configuration Updated')) {
+                                resultDiv.style.display = 'none';
+                            }
+                        }, 2000);
                         
                         console.log(`🎭 Mode switched to: ${currentMode}`);
                     }
@@ -624,56 +664,76 @@ def index():
                 }
             }
             
-            // Ctrl+D: Create slow database performance demo (like the good trace you're happy with)
+            // Ctrl+D: Slow database demo through normal user journey
             if (e.ctrlKey && e.key === 'd') {
                 e.preventDefault();
                 
                 const resultDiv = document.getElementById('result');
                 resultDiv.style.display = 'block';
-                resultDiv.innerHTML = '<div class="loading">🔵 Creating slow database performance demo...</div>';
+                resultDiv.innerHTML = '<div class="loading">🐌 Enabling slow database mode and testing normal user journey...</div>';
                 
                 try {
-                    // Create trace headers for distributed tracing (like the good trace)
-                    const headers = createTraceHeaders('slow_db_performance_demo');
-                    
-                    const response = await fetch(`${API_GATEWAY_URL}/api/demo/slow-db`, {
+                    // Step 1: Enable slow database mode
+                    const slowModeResponse = await fetch(`${API_GATEWAY_URL}/api/enable-slow-mode`, {
                         method: 'POST',
-                        headers: { 
-                            'Content-Type': 'application/json',
-                            ...headers
-                        }
+                        headers: { 'Content-Type': 'application/json' }
                     });
                     
-                    const data = await response.json();
+                    // Step 2: Simulate normal user query with slow database
+                    const testQuery = "Show me errors from the last hour grouped by service";
                     
-                    if (response.ok && data.success) {
+                    // Use the same trace creation as normal queries
+                    const headers = createTraceHeaders('slow_db_user_journey');
+                    
+                    const queryResponse = await fetch(`${API_GATEWAY_URL}/api/generate-query`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            ...headers
+                        },
+                        body: JSON.stringify({
+                            user_input: testQuery,
+                            slow_mode: true  // Flag for slow database simulation
+                        })
+                    });
+                    
+                    const data = await queryResponse.json();
+                    
+                    if (data.success) {
                         resultDiv.innerHTML = `
-                            <div class="result" style="background: #e7f3ff; border-color: #007bff;">
-                                <h3>🔵 Slow Database Performance Demo</h3>
-                                <p><strong>Operation:</strong> SQLite database performance analysis</p>
-                                <p><strong>Duration:</strong> ${data.duration_seconds}s</p>
-                                <p><strong>Services:</strong> ${data.performance_analysis.services_involved.join(', ')}</p>
-                                <p><strong>Database Operations:</strong> ${data.storage_result.operations_performed} SQLite operations</p>
-                                <p><strong>Status:</strong> ✅ Complete with nested SQLite spans</p>
-                                <p><small><strong>Trace ID:</strong> ${data.trace_id}</small></p>
-                                <p><small><strong>Analysis:</strong> ${data.storage_result.performance_analysis.total_duration}</small></p>
+                            <div class="result" style="background: #fff3cd; border-color: #ffc107;">
+                                <h3>🐌 Slow Database Demo - Normal User Journey</h3>
+                                <p><strong>Test Query:</strong> "${testQuery}"</p>
+                                <p><strong>Generated Query:</strong> <code>${data.query}</code></p>
+                                <p><strong>Processing Time:</strong> ${data.processing_time_ms || 'N/A'}ms</p>
+                                <p><strong>Services Called:</strong> ${data.services_called ? data.services_called.join(' → ') : 'N/A'}</p>
+                                <p><strong>Trace ID:</strong> <code>${currentTraceId}</code></p>
+                                
+                                <div style="margin-top: 15px; padding: 10px; background: #e7f3ff; border-radius: 5px;">
+                                    <strong>🔍 What to Look For in Coralogix:</strong>
+                                    <ul style="margin: 5px 0; padding-left: 20px;">
+                                        <li>Single root span from frontend through all services</li>
+                                        <li>Storage Service showing 2-3 second database operations</li>
+                                        <li>Normal Query Service and Validation Service timing</li>
+                                        <li>Clear bottleneck identification in span timeline</li>
+                                    </ul>
+                                </div>
                             </div>
                         `;
-                        
-                        console.log(`🔵 Slow database demo completed: ${data.trace_id}`);
                     } else {
                         resultDiv.innerHTML = `
                             <div class="result" style="border-color: #dc3545; background: #f8d7da;">
                                 <h3>❌ Slow Database Demo Failed</h3>
-                                <p>${data.error || 'Unknown error'}</p>
+                                <p>Error: ${data.error || 'Unknown error'}</p>
                             </div>
                         `;
                     }
+                    
                 } catch (error) {
                     resultDiv.innerHTML = `
                         <div class="result" style="border-color: #dc3545; background: #f8d7da;">
-                            <h3>💥 Network Error:</h3>
-                            <p>Failed to create slow database demo. Please check if the distributed system is running.</p>
+                            <h3>❌ Slow Database Demo Failed</h3>
+                            <p>Error: ${error.message}</p>
                         </div>
                     `;
                 }
