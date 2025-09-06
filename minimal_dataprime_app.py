@@ -15,12 +15,16 @@ import sys
 import json
 import time
 import asyncio
+import sqlite3
+import uuid
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from flask import Flask, request, jsonify, render_template_string
 from flask_socketio import SocketIO, emit, disconnect
 from openai import OpenAI, AsyncOpenAI
-from opentelemetry import trace
+from opentelemetry import trace, context
+from opentelemetry.instrumentation.sqlite3 import SQLite3Instrumentor
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 # Load environment variables from .env file
 from dotenv import load_dotenv
@@ -75,13 +79,80 @@ def initialize_telemetry():
         )
         print("✅ Coralogix export configured")
         
+        # Instrument OpenAI
         OpenAIInstrumentor().instrument()
         print("✅ OpenAI instrumentation enabled")
+        
+        # Instrument SQLite3 for feedback database tracing
+        SQLite3Instrumentor().instrument()
+        print("✅ SQLite3 instrumentation enabled")
+        
+        # Instrument Flask for automatic request tracing
+        from opentelemetry.instrumentation.flask import FlaskInstrumentor
+        # Note: FlaskInstrumentor will be called after Flask app is created
+        
+        # CRITICAL: Instrument requests for MCP calls to be traced properly
+        from opentelemetry.instrumentation.requests import RequestsInstrumentor
+        RequestsInstrumentor().instrument()
+        print("✅ Requests instrumentation enabled for MCP calls")
         
         return True
     except Exception as e:
         print(f"❌ Telemetry setup failed: {e}")
         print("⚠️  App will continue without telemetry...")
+        return False
+
+def extract_trace_context_from_request():
+    """Extract W3C trace context from HTTP request headers."""
+    try:
+        # Get the trace context propagator
+        propagator = TraceContextTextMapPropagator()
+        
+        # Extract context from request headers
+        carrier = dict(request.headers)
+        context = propagator.extract(carrier)
+        
+        return context
+    except Exception as e:
+        print(f"⚠️ Failed to extract trace context: {e}")
+        return None
+
+def initialize_feedback_database():
+    """Initialize SQLite3 database for feedback (instrumentation handled by main telemetry setup)."""
+    try:
+        print("🔧 Initializing feedback database...")
+        
+        # Create database and table (SQLite3 instrumentation already set up in telemetry init)
+        conn = sqlite3.connect('feedback.db')
+        cursor = conn.cursor()
+        
+        # Create feedback table if it doesn't exist
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                query_text TEXT NOT NULL,
+                user_input TEXT NOT NULL,
+                feedback_type TEXT NOT NULL CHECK (feedback_type IN ('thumbs_up', 'thumbs_down')),
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                trace_id TEXT,
+                span_id TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Create index for better query performance
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_feedback_session ON feedback(session_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_feedback_trace ON feedback(trace_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_feedback_type ON feedback(feedback_type)')
+        
+        conn.commit()
+        conn.close()
+        
+        print("✅ Feedback database initialized successfully")
+        return True
+    except Exception as e:
+        print(f"❌ Failed to initialize feedback database: {e}")
         return False
 
 def load_dataprime_components():
@@ -104,6 +175,9 @@ def load_dataprime_components():
 
 # Initialize telemetry FIRST
 telemetry_enabled = initialize_telemetry()
+
+# Initialize feedback database
+feedback_db_enabled = initialize_feedback_database()
 
 # Initialize DataPrime components
 knowledge_base, validator = load_dataprime_components()
@@ -446,6 +520,15 @@ MAX_CACHE_SIZE = 100
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'dev-key-minimal-app')
 
+# Instrument Flask for automatic request tracing (if telemetry is enabled)
+if telemetry_enabled:
+    try:
+        from opentelemetry.instrumentation.flask import FlaskInstrumentor
+        FlaskInstrumentor().instrument_app(app)
+        print("✅ Flask instrumentation enabled")
+    except Exception as e:
+        print(f"⚠️ Flask instrumentation failed: {e}")
+
 # Initialize SocketIO for real-time voice communication
 socketio = SocketIO(
     app, 
@@ -472,7 +555,7 @@ def toggle_mode():
         new_mode = "smart" if current_mode == "permissive" else "permissive"
         app_stats["demo_mode"] = new_mode
         
-        print(f"🎭 [DEMO] Mode switched to: {new_mode}")
+        print(f"Mode switched to: {new_mode}")
         
         return jsonify({
             "success": True,
@@ -492,6 +575,7 @@ def health_check():
             "service": "dataprime_assistant",
             "version": "voice-enabled-mcp-1.0",
             "telemetry_enabled": telemetry_enabled,
+            "feedback_db_enabled": feedback_db_enabled,
             "dataprime_components": knowledge_base is not None,
             "openai_configured": bool(os.getenv('OPENAI_API_KEY')),
             "coralogix_configured": bool(os.getenv('CX_TOKEN')),
@@ -511,6 +595,323 @@ def health_check():
             "error": str(e),
             "timestamp": datetime.now().isoformat()
         }), 500
+
+@app.route('/api/feedback', methods=['POST'])
+def submit_feedback():
+    """Submit user feedback for a DataPrime query with distributed tracing support."""
+    # Extract trace context from request headers and set as current
+    trace_context = extract_trace_context_from_request()
+    if trace_context:
+        # Set the extracted context as current context for this request
+
+        token = context.attach(trace_context)
+    else:
+        token = None
+    
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "No data provided"}), 400
+        
+        # Validate required fields
+        required_fields = ['session_id', 'query_text', 'user_input', 'feedback_type']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({"success": False, "error": f"Missing required field: {field}"}), 400
+        
+        # Validate feedback_type
+        if data['feedback_type'] not in ['thumbs_up', 'thumbs_down']:
+            return jsonify({"success": False, "error": "Invalid feedback_type. Must be 'thumbs_up' or 'thumbs_down'"}), 400
+        
+        # Get original trace ID for correlation
+        original_trace_id = data.get('original_trace_id')
+        
+        # Get current span to add attributes (Flask instrumentation should have created one)
+        current_span = trace.get_current_span()
+        if current_span:
+            # Add correlation attributes for Coralogix filtering and analysis
+            if original_trace_id:
+                current_span.set_attribute("correlation.original_trace_id", original_trace_id)
+                current_span.set_attribute("correlation.type", "user_feedback")
+                current_span.set_attribute("correlation.enabled", True)
+                # Add a common correlation ID for easy filtering
+                current_span.set_attribute("correlation.session", data['session_id'])
+            else:
+                current_span.set_attribute("correlation.enabled", False)
+        
+        return _process_feedback(data, current_span, original_trace_id)
+            
+    except Exception as e:
+        print(f"❌ Error in feedback submission: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        # Detach trace context if it was attached
+        if trace_context and token:
+    
+            context.detach(token)
+
+def _process_feedback(data, span, original_trace_id):
+    """Process feedback submission within a span context."""
+    try:
+        # Get current trace context for correlation
+        current_span = trace.get_current_span()
+        trace_id = format(current_span.get_span_context().trace_id, '032x') if current_span else None
+        span_id = format(current_span.get_span_context().span_id, '016x') if current_span else None
+        
+        # Add span attributes for better observability
+        span.set_attribute("feedback.type", data['feedback_type'])
+        span.set_attribute("feedback.session_id", data['session_id'])
+        span.set_attribute("feedback.has_query", len(data['query_text']) > 0)
+        span.set_attribute("feedback.trace_id", trace_id or "unknown")
+        if original_trace_id:
+            span.set_attribute("feedback.original_trace_id", original_trace_id)
+            span.set_attribute("feedback.correlated", True)
+        else:
+            span.set_attribute("feedback.correlated", False)
+        
+        # Store feedback in database
+        conn = sqlite3.connect('feedback.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO feedback (session_id, query_text, user_input, feedback_type, trace_id, span_id)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (
+            data['session_id'],
+            data['query_text'],
+            data['user_input'],
+            data['feedback_type'],
+            trace_id,
+            span_id
+        ))
+        
+        feedback_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        
+        # Update app stats
+        app_stats["feedback_count"] = app_stats.get("feedback_count", 0) + 1
+        if data['feedback_type'] == 'thumbs_up':
+            app_stats["positive_feedback"] = app_stats.get("positive_feedback", 0) + 1
+        else:
+            app_stats["negative_feedback"] = app_stats.get("negative_feedback", 0) + 1
+        
+        correlation_msg = f" (correlated with {original_trace_id})" if original_trace_id else " (new trace)"
+        print(f"✅ Feedback received: {data['feedback_type']} for session {data['session_id']}{correlation_msg}")
+        
+        return jsonify({
+            "success": True,
+            "feedback_id": feedback_id,
+            "trace_id": trace_id,
+            "original_trace_id": original_trace_id,
+            "correlated": bool(original_trace_id),
+            "message": "Feedback submitted successfully"
+        })
+        
+    except Exception as e:
+        span.set_attribute("error", True)
+        span.set_attribute("error.message", str(e))
+        print(f"❌ Error processing feedback: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/feedback/stats', methods=['GET'])
+def get_feedback_stats():
+    """Get feedback statistics for demo purposes."""
+    tracer = trace.get_tracer(__name__)
+    
+    with tracer.start_as_current_span("get_feedback_stats") as span:
+        try:
+            conn = sqlite3.connect('feedback.db')
+            cursor = conn.cursor()
+            
+            # Get basic stats
+            cursor.execute('SELECT COUNT(*) as total FROM feedback')
+            total_feedback = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) as positive FROM feedback WHERE feedback_type = 'thumbs_up'")
+            positive_feedback = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) as negative FROM feedback WHERE feedback_type = 'thumbs_down'")
+            negative_feedback = cursor.fetchone()[0]
+            
+            # Get recent feedback
+            cursor.execute('''
+                SELECT session_id, feedback_type, timestamp, trace_id 
+                FROM feedback 
+                ORDER BY timestamp DESC 
+                LIMIT 10
+            ''')
+            recent_feedback = []
+            for row in cursor.fetchall():
+                recent_feedback.append({
+                    "session_id": row[0],
+                    "feedback_type": row[1],
+                    "timestamp": row[2],
+                    "trace_id": row[3]
+                })
+            
+            conn.close()
+            
+            # Calculate satisfaction rate
+            satisfaction_rate = (positive_feedback / total_feedback * 100) if total_feedback > 0 else 0
+            
+            stats = {
+                "total_feedback": total_feedback,
+                "positive_feedback": positive_feedback,
+                "negative_feedback": negative_feedback,
+                "satisfaction_rate": round(satisfaction_rate, 2),
+                "recent_feedback": recent_feedback,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            # Add span attributes
+            span.set_attribute("stats.total_feedback", total_feedback)
+            span.set_attribute("stats.satisfaction_rate", satisfaction_rate)
+            
+            return jsonify(stats)
+            
+        except Exception as e:
+            span.set_attribute("error", True)
+            span.set_attribute("error.message", str(e))
+            print(f"❌ Error getting feedback stats: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/demo/slow-db', methods=['POST'])
+def demo_slow_database():
+    """Demonstrate slow database operations for tracing demo purposes."""
+    # Extract trace context from request headers
+    trace_context = extract_trace_context_from_request()
+    if trace_context:
+        token = context.attach(trace_context)
+    else:
+        token = None
+    
+    try:
+        tracer = trace.get_tracer(__name__)
+        with tracer.start_as_current_span("Slow Database Demo") as main_span:
+            import time
+            
+            # Add demo attributes
+            main_span.set_attribute("demo.type", "slow_database")
+            main_span.set_attribute("demo.purpose", "performance_analysis")
+            main_span.set_attribute("demo.expected_duration_seconds", 3.5)
+            
+            # Step 1: Simulate slow connection
+            with tracer.start_as_current_span("Database Connection") as conn_span:
+                conn_span.set_attribute("db.operation", "connect")
+                conn_span.set_attribute("db.connection_pool", "exhausted")
+                conn_span.add_event("Waiting for available connection...")
+                time.sleep(0.8)  # Simulate connection pool wait
+                conn_span.add_event("Connection acquired from pool")
+                
+            # Step 2: Simulate slow query execution
+            with tracer.start_as_current_span("Complex Analytics Query") as query_span:
+                query_span.set_attribute("db.operation", "SELECT")
+                query_span.set_attribute("db.table", "feedback")
+                query_span.set_attribute("db.query_type", "analytics")
+                query_span.set_attribute("db.rows_examined", 50000)
+                query_span.set_attribute("db.using_index", False)
+                
+                # Simulate different phases of slow query
+                query_span.add_event("Starting full table scan...")
+                time.sleep(1.2)
+                
+                query_span.add_event("Processing aggregations...")
+                time.sleep(0.8)
+                
+                query_span.add_event("Sorting results...")
+                time.sleep(0.7)
+                
+                # Actually run a simple query (but the sleep simulates the slowness)
+                conn = sqlite3.connect('feedback.db')
+                cursor = conn.cursor()
+                
+                cursor.execute('''
+                    SELECT 
+                        feedback_type,
+                        COUNT(*) as count,
+                        AVG(LENGTH(query_text)) as avg_query_length
+                    FROM feedback 
+                    GROUP BY feedback_type
+                ''')
+                results = cursor.fetchall()
+                conn.close()
+                
+                query_span.set_attribute("db.rows_returned", len(results))
+                query_span.add_event("Query completed")
+            
+            # Step 3: Simulate slow result processing
+            with tracer.start_as_current_span("Result Processing") as process_span:
+                process_span.set_attribute("processing.type", "aggregation")
+                process_span.set_attribute("processing.complexity", "high")
+                process_span.add_event("Processing complex calculations...")
+                time.sleep(0.5)
+                
+                # Format results
+                formatted_results = []
+                for row in results:
+                    formatted_results.append({
+                        "feedback_type": row[0],
+                        "count": row[1], 
+                        "avg_query_length": round(row[2], 2) if row[2] else 0
+                    })
+                
+                process_span.set_attribute("processing.results_count", len(formatted_results))
+                process_span.add_event("Processing completed")
+            
+            # Calculate total duration
+            total_duration = 0.8 + 1.2 + 0.8 + 0.7 + 0.5  # Sum of all sleeps
+            main_span.set_attribute("demo.actual_duration_seconds", total_duration)
+            main_span.set_attribute("db.performance_issue", True)
+            main_span.set_attribute("db.optimization_needed", True)
+            main_span.add_event("Slow database operation completed - optimization recommended")
+            
+            # Get current trace ID for response
+            current_span = trace.get_current_span()
+            trace_id = format(current_span.get_span_context().trace_id, '032x') if current_span else None
+            
+            print(f"Slow DB demo completed in {total_duration}s (trace: {trace_id})")
+            
+            return jsonify({
+                "message": "Slow database operation completed",
+                "demo_type": "slow_database",
+                "duration_seconds": total_duration,
+                "performance_analysis": {
+                    "connection_wait": "0.8s - connection pool exhausted",
+                    "query_execution": "2.7s - full table scan without index",
+                    "result_processing": "0.5s - complex aggregations"
+                },
+                "recommendations": [
+                    "Add database index on feedback_type column",
+                    "Implement connection pooling optimization",
+                    "Consider query result caching",
+                    "Use pagination for large result sets"
+                ],
+                "results": formatted_results,
+                "trace_id": trace_id
+            })
+            
+    except Exception as e:
+        if 'main_span' in locals():
+            main_span.record_exception(e)
+            main_span.set_status(trace.Status(trace.StatusCode.ERROR, f"Slow DB demo failed: {str(e)}"))
+        
+        trace_id = None
+        try:
+            current_span = trace.get_current_span()
+            trace_id = format(current_span.get_span_context().trace_id, '032x') if current_span else None
+        except:
+            pass
+            
+        print(f"❌ Slow DB demo failed: {e}")
+        return jsonify({
+            "error": "Slow database demo failed",
+            "trace_id": trace_id
+        }), 500
+        
+    finally:
+        if token:
+            context.detach(token)
 
 @app.route('/api/mcp/test-connection', methods=['POST'])
 def test_mcp_connection():
@@ -632,7 +1033,14 @@ def execute_mcp_query():
 
 @app.route('/api/generate-query', methods=['POST'])
 def generate_query():
-    """Core query generation endpoint - minimal but functional."""
+    """Core query generation endpoint with distributed tracing support."""
+    # Extract trace context from request headers and set as current
+    trace_context = extract_trace_context_from_request()
+    if trace_context:
+        # Set the extracted context as current context for this request
+
+        token = context.attach(trace_context)
+    
     try:
         app_stats["queries_processed"] += 1
         
@@ -673,9 +1081,8 @@ def generate_query():
                     "error": "OpenAI client not available",
                     "details": "Please check your OPENAI_API_KEY configuration"
                 }), 500
-            # Get current demo mode
+            # Get current mode
             current_mode = app_stats.get("demo_mode", "permissive")
-            print(f"🎭 [DEMO] Current mode: {current_mode}")
             
             # Use enhanced system prompt based on intent and knowledge base
             if knowledge_base and intent_info.get("intent") != "unknown":
@@ -814,6 +1221,18 @@ Generate ONLY the query syntax, no explanations. Make your best attempt to creat
         # Step 4: Return result
         app_stats["successful_queries"] += 1
         
+        # Get current trace ID for feedback correlation
+        current_span = trace.get_current_span()
+        trace_id = format(current_span.get_span_context().trace_id, '032x') if current_span else None
+        
+        # Add correlation attributes to the query span for easier Coralogix filtering
+        if current_span and trace_id:
+            current_span.set_attribute("query.generated", True)
+            current_span.set_attribute("query.intent", intent_info.get('intent', 'unknown'))
+            current_span.set_attribute("query.user_input", user_input)
+            current_span.set_attribute("correlation.awaiting_feedback", True)
+            current_span.set_attribute("correlation.trace_id", trace_id)
+        
         result = {
             "success": True,
             "query": generated_query,
@@ -826,7 +1245,8 @@ Generate ONLY the query syntax, no explanations. Make your best attempt to creat
             "telemetry_enabled": telemetry_enabled,
             "evaluation_ready": True,
             "demo_mode": current_mode,
-            "knowledge_base_used": knowledge_base is not None
+            "knowledge_base_used": knowledge_base is not None,
+            "trace_id": trace_id
         }
         
         print(f"🎉 Query generated successfully!")
@@ -1652,6 +2072,63 @@ def web_interface():
             100% { transform: rotate(360deg); }
         }
         
+        /* Feedback button styles */
+        .feedback-container {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #e2e8f0;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .feedback-label {
+            font-weight: 600;
+            color: #4a5568;
+            font-size: 14px;
+        }
+        .feedback-button {
+            background: transparent;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 8px 12px;
+            cursor: pointer;
+            font-size: 18px;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .feedback-button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .feedback-button.thumbs-up:hover {
+            border-color: #48bb78;
+            color: #48bb78;
+            background: rgba(72, 187, 120, 0.1);
+        }
+        .feedback-button.thumbs-down:hover {
+            border-color: #f56565;
+            color: #f56565;
+            background: rgba(245, 101, 101, 0.1);
+        }
+        .feedback-button.selected.thumbs-up {
+            border-color: #48bb78;
+            color: #48bb78;
+            background: rgba(72, 187, 120, 0.2);
+        }
+        .feedback-button.selected.thumbs-down {
+            border-color: #f56565;
+            color: #f56565;
+            background: rgba(245, 101, 101, 0.2);
+        }
+        .feedback-status {
+            font-size: 12px;
+            color: #718096;
+            margin-left: 10px;
+        }
+
+        
         /* Enhanced voice interface styling */
         .voice-controls { 
             background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1)); 
@@ -1802,14 +2279,17 @@ def web_interface():
 </head>
 <body>
     <div class="container">
-        <h1>🎙️ Voice-Enabled DataPrime Assistant <span id="modeIndicator" style="font-size: 0.5em; margin-left: 10px;">🟠</span></h1>
+        <h1>🎙️ Voice-Enabled DataPrime Assistant</h1>
+
         
         <div class="status {{ 'ok' if telemetry_enabled else 'warning' }}">
             <strong>Status:</strong> 
             Telemetry: {{ '✅ Enabled' if telemetry_enabled else '⚠️ Disabled' }} | 
             DataPrime: {{ '✅ Loaded' if dataprime_loaded else '⚠️ Not loaded' }} | 
-            Voice: {{ '✅ Enabled' if voice_enabled else '⚠️ Disabled' }}
+            Voice: {{ '✅ Enabled' if voice_enabled else '⚠️ Disabled' }} | 
+            <span id="modeIndicator" style="font-size: 12px;" title="Current mode">🟠</span>
         </div>
+        
         
         <!-- Interface Tabs -->
         <div class="tabs">
@@ -1858,7 +2338,8 @@ def web_interface():
         </div>
         
         <div style="margin-top: 30px; font-size: 12px; color: #666; text-align: center;">
-            Voice-Enabled DataPrime Assistant | Built with ❤️ for Coralogix Observability
+            Voice-Enabled DataPrime Assistant | Built with ❤️ for Coralogix Observability<br>
+            <span style="font-size: 10px; opacity: 0.7;">💡 Demo shortcuts: Ctrl+S (toggle mode), Ctrl+D (slow span), Ctrl+B (slow database)</span>
         </div>
     </div>
 
@@ -1867,11 +2348,36 @@ def web_interface():
     
     <script>
         let currentMode = 'permissive'; // Track current mode
+        let currentTraceId = null; // Track the current trace ID for distributed tracing
+        let currentSpanId = null; // Track current span ID
         let socket = null;
         let mediaRecorder = null;
         let audioChunks = [];
         let isRecording = false;
         let conversationHistory = [];
+
+        // Generate trace ID in W3C format (32 hex characters)
+        function generateTraceId() {
+            return Array.from({length: 32}, () => Math.floor(Math.random() * 16).toString(16)).join('');
+        }
+
+        // Generate span ID in W3C format (16 hex characters)  
+        function generateSpanId() {
+            return Array.from({length: 16}, () => Math.floor(Math.random() * 16).toString(16)).join('');
+        }
+
+        // Create W3C trace context headers
+        function createTraceHeaders() {
+            if (!currentTraceId) {
+                currentTraceId = generateTraceId();
+                currentSpanId = generateSpanId();
+            }
+            
+            return {
+                'traceparent': `00-${currentTraceId}-${currentSpanId}-01`,
+                'tracestate': ''
+            };
+        }
         
         // Initialize SocketIO connection for voice
         function initializeVoiceConnection() {
@@ -2070,6 +2576,90 @@ def web_interface():
             
             return new Blob(byteArrays, { type: contentType });
         }
+        
+        // Feedback submission function
+        async function submitFeedback(sessionId, feedbackType, userInput, query, originalTraceId) {
+            try {
+                const statusElement = document.getElementById(`feedback-status-${sessionId}`);
+                statusElement.textContent = 'Submitting...';
+                
+                const requestBody = {
+                    session_id: sessionId,
+                    feedback_type: feedbackType,
+                    user_input: userInput,
+                    query_text: query
+                };
+                
+                // Add original trace ID if available for trace correlation
+                if (originalTraceId) {
+                    requestBody.original_trace_id = originalTraceId;
+                }
+                
+                // Use the same trace context for feedback (child span)
+                const traceHeaders = currentTraceId ? {
+                    'traceparent': `00-${currentTraceId}-${generateSpanId()}-01`,
+                    'tracestate': ''
+                } : {};
+                
+                const response = await fetch('/api/feedback', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        ...traceHeaders
+                    },
+                    body: JSON.stringify(requestBody)
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    statusElement.textContent = 'Thank you for your feedback!';
+                    statusElement.style.color = '#48bb78';
+                    
+                    // Update button states
+                    const resultDiv = document.querySelector(`[data-session-id="${sessionId}"]`);
+                    const buttons = resultDiv.querySelectorAll('.feedback-button');
+                    buttons.forEach(btn => btn.classList.remove('selected'));
+                    
+                    const selectedButton = resultDiv.querySelector(`.feedback-button.${feedbackType.replace('_', '-')}`);
+                    selectedButton.classList.add('selected');
+                    
+                    // Disable buttons after submission
+                    buttons.forEach(btn => {
+                        btn.style.pointerEvents = 'none';
+                        btn.style.opacity = '0.7';
+                    });
+                    
+                    console.log(`✅ Feedback submitted: ${feedbackType} for session ${sessionId}, trace: ${data.trace_id}`);
+                } else {
+                    statusElement.textContent = 'Failed to submit feedback';
+                    statusElement.style.color = '#f56565';
+                }
+            } catch (error) {
+                console.error('Error submitting feedback:', error);
+                const statusElement = document.getElementById(`feedback-status-${sessionId}`);
+                statusElement.textContent = 'Error submitting feedback';
+                statusElement.style.color = '#f56565';
+            }
+        }
+        
+        // Add event listeners for feedback buttons (using event delegation)
+        document.addEventListener('click', function(event) {
+            if (event.target.closest('.feedback-button')) {
+                const button = event.target.closest('.feedback-button');
+                const sessionId = button.getAttribute('data-session-id');
+                const feedbackType = button.getAttribute('data-feedback-type');
+                
+                // Get the result container to extract user input, query, and trace ID
+                const resultDiv = button.closest('.result');
+                const userInput = resultDiv.getAttribute('data-user-input') || 'Unknown input';
+                const query = resultDiv.getAttribute('data-query') || 'Unknown query';
+                const traceId = resultDiv.getAttribute('data-trace-id') || null;
+                
+                submitFeedback(sessionId, feedbackType, userInput, query, traceId);
+            }
+        });
+        
         
         async function toggleVoiceRecording() {
             if (!socket) {
@@ -2274,21 +2864,19 @@ def web_interface():
                     if (data.success) {
                         currentMode = data.current_mode;
                         
-                        // Update the mode indicator - green for smart mode
+                        // Update subtle mode indicator
                         const indicator = document.getElementById('modeIndicator');
-                        if (currentMode === 'smart') {
-                            indicator.textContent = '🟢'; // Green circle for smart mode
-                            indicator.style.fontSize = '1em';
-                        } else {
-                            indicator.textContent = '🟠'; // Orange circle for permissive mode  
-                            indicator.style.fontSize = '1em';
+                        if (indicator) {
+                            if (currentMode === 'smart') {
+                                indicator.textContent = '🟢';
+                                indicator.title = 'Smart mode';
+                            } else {
+                                indicator.textContent = '🟠';
+                                indicator.title = 'Permissive mode';
+                            }
                         }
                         
-                        console.log('🎭 Demo mode switched to:', currentMode);
-                        
-                        // Optional: Brief flash to confirm switch (very subtle)
-                        indicator.style.opacity = '1';
-                        setTimeout(() => indicator.style.opacity = '0.7', 1000);
+                        console.log('Mode switched to:', currentMode);
                     }
                 } catch (error) {
                     console.log('Mode toggle failed:', error);
@@ -2339,13 +2927,102 @@ def web_interface():
                     `;
                 }
             }
+            
+            // Ctrl+B: Slow database demo for performance analysis
+            if (e.ctrlKey && e.key === 'b') {
+                e.preventDefault();
+                
+                const resultDiv = document.getElementById('result');
+                resultDiv.style.display = 'block';
+                resultDiv.innerHTML = '<div class="loading">🐌 Running slow database operation...</div>';
+                
+                try {
+                    // Create trace headers for distributed tracing
+                    const traceHeaders = createTraceHeaders();
+                    
+                    const response = await fetch('/api/demo/slow-db', {
+                        method: 'POST',
+                        headers: { 
+                            'Content-Type': 'application/json',
+                            ...traceHeaders
+                        }
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (response.ok) {
+                        resultDiv.innerHTML = `
+                            <div class="result" style="background: #fff3cd; border-color: #ffc107;">
+                                <h3>🐌 Slow Database Operation Completed</h3>
+                                <p><strong>Duration:</strong> ${data.duration_seconds}s</p>
+                                <p><strong>Trace ID:</strong> <code>${data.trace_id}</code></p>
+                                
+                                <h4>📊 Performance Analysis:</h4>
+                                <ul>
+                                    <li><strong>Connection Wait:</strong> ${data.performance_analysis.connection_wait}</li>
+                                    <li><strong>Query Execution:</strong> ${data.performance_analysis.query_execution}</li>
+                                    <li><strong>Result Processing:</strong> ${data.performance_analysis.result_processing}</li>
+                                </ul>
+                                
+                                <h4>💡 Optimization Recommendations:</h4>
+                                <ul>
+                                    ${data.recommendations.map(rec => `<li>${rec}</li>`).join('')}
+                                </ul>
+                                
+                                <h4>📋 Query Results:</h4>
+                                <pre>${JSON.stringify(data.results, null, 2)}</pre>
+                                
+                                <p><small><strong>Demo Purpose:</strong> This slow operation demonstrates how distributed tracing helps identify database performance bottlenecks. Check Coralogix for detailed span analysis!</small></p>
+                            </div>
+                        `;
+                        
+                        console.log(`🐌 Slow DB demo completed in ${data.duration_seconds}s (trace: ${data.trace_id})`);
+                    } else {
+                        resultDiv.innerHTML = `
+                            <div class="result" style="border-color: #dc3545; background: #f8d7da;">
+                                <h3>❌ Slow Database Demo Failed</h3>
+                                <p>${data.error}</p>
+                                ${data.trace_id ? `<p><strong>Trace ID:</strong> <code>${data.trace_id}</code></p>` : ''}
+                            </div>
+                        `;
+                    }
+                } catch (error) {
+                    resultDiv.innerHTML = `
+                        <div class="result" style="border-color: #dc3545; background: #f8d7da;">
+                            <h3>💥 Network Error</h3>
+                            <p>Failed to run slow database demo: ${error.message}</p>
+                            <p><small>Please check if the app is running.</small></p>
+                        </div>
+                    `;
+                    console.error('Slow DB demo error:', error);
+                }
+            }
         });
         
-        // Initialize mode indicator
-        window.addEventListener('load', () => {
-            const indicator = document.getElementById('modeIndicator');
-            indicator.textContent = '🟠'; // Start with orange (permissive)
-            indicator.style.fontSize = '1em';
+        // Initialize current mode and subtle indicator
+        window.addEventListener('load', async () => {
+            try {
+                const response = await fetch('/api/health');
+                const data = await response.json();
+                currentMode = data.demo_mode || 'permissive';
+                
+                // Update subtle mode indicator
+                const indicator = document.getElementById('modeIndicator');
+                if (indicator) {
+                    if (currentMode === 'smart') {
+                        indicator.textContent = '🟢';
+                        indicator.title = 'Smart mode';
+                    } else {
+                        indicator.textContent = '🟠';
+                        indicator.title = 'Permissive mode';
+                    }
+                }
+                
+                console.log('Initial mode loaded:', currentMode);
+            } catch (error) {
+                console.log('Failed to load initial mode, defaulting to permissive:', error);
+                currentMode = 'permissive';
+            }
         });
         
         // MCP Connection Testing
@@ -2443,7 +3120,7 @@ def web_interface():
                     const analysis = mcpData.ai_analysis;
                     
                     let resultHTML = `
-                        <div class="result" style="background: #e7f3ff; border-color: #007bff;">
+                        <div class="result" style="background: #e7f3ff; border-color: #007bff;" data-user-input="${userInput.replace(/"/g, '&quot;')}" data-query="${execution.original_query.replace(/"/g, '&quot;')}">
                             <h3>🚀 Complete Intelligence Pipeline</h3>
                             
                             <h4>📝 Generated Query:</h4>
@@ -2494,7 +3171,18 @@ def web_interface():
                         `;
                     }
                     
+                    const mcpSessionId = Date.now().toString() + '-mcp'; // Unique session ID for MCP results
                     resultHTML += `
+                            <div class="feedback-container">
+                                <span class="feedback-label">Was this analysis helpful?</span>
+                                <button class="feedback-button thumbs-up" data-session-id="${mcpSessionId}" data-feedback-type="thumbs_up">
+                                    👍 <span>Yes</span>
+                                </button>
+                                <button class="feedback-button thumbs-down" data-session-id="${mcpSessionId}" data-feedback-type="thumbs_down">
+                                    👎 <span>No</span>
+                                </button>
+                                <span class="feedback-status" id="feedback-status-${mcpSessionId}"></span>
+                            </div>
                             <p><small>Completed at: ${mcpData.timestamp}</small></p>
                         </div>
                     `;
@@ -2533,23 +3221,41 @@ def web_interface():
             resultDiv.innerHTML = '<div class="loading">🔄 Generating query...</div>';
             
             try {
+                // Create trace headers for distributed tracing
+                const traceHeaders = createTraceHeaders();
+                
                 const response = await fetch('/api/generate-query', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        ...traceHeaders
+                    },
                     body: JSON.stringify({ user_input: userInput })
                 });
                 
                 const data = await response.json();
                 
                 if (data.success) {
+                    const sessionId = Date.now().toString(); // Simple session ID
                     resultDiv.innerHTML = `
-                        <div class="result">
+                        <div class="result" data-session-id="${sessionId}" data-user-input="${userInput.replace(/"/g, '&quot;')}" data-query="${data.query.replace(/"/g, '&quot;')}" data-trace-id="${data.trace_id || ''}">
                             <h3>✅ Generated DataPrime Query:</h3>
                             <div class="query">${data.query}</div>
                             <p><strong>Intent:</strong> ${data.intent}</p>
                             <p><strong>Valid:</strong> ${data.validation.is_valid ? '✅ Yes' : '❌ No'}</p>
                             ${data.validation.warnings.length > 0 ? '<p><strong>Warnings:</strong> ' + data.validation.warnings.join(', ') + '</p>' : ''}
                             <p><small>Generated at: ${data.timestamp}</small></p>
+                            ${data.trace_id ? '<p><small>Trace ID: ' + data.trace_id + '</small></p>' : ''}
+                            <div class="feedback-container">
+                                <span class="feedback-label">Was this helpful?</span>
+                                <button class="feedback-button thumbs-up" data-session-id="${sessionId}" data-feedback-type="thumbs_up">
+                                    👍 <span>Yes</span>
+                                </button>
+                                <button class="feedback-button thumbs-down" data-session-id="${sessionId}" data-feedback-type="thumbs_down">
+                                    👎 <span>No</span>
+                                </button>
+                                <span class="feedback-status" id="feedback-status-${sessionId}"></span>
+                            </div>
                         </div>
                     `;
                 } else {

@@ -10,6 +10,8 @@ opentelemetry-sdk>=1.32.0
 opentelemetry-semantic-conventions>=0.48b0
 opentelemetry-exporter-otlp>=1.32.0
 opentelemetry-instrumentation>=0.48b0
+opentelemetry-instrumentation-sqlite3>=0.48b0
+opentelemetry-instrumentation-flask>=0.48b0
 
 # Development and testing
 pytest==8.2.2
@@ -40,3 +42,6 @@ websockets>=12.0
 
 # MCP client for real data execution
 aiohttp>=3.10.0
+
+# Additional dependencies for distributed system
+opentelemetry-instrumentation-requests>=0.48b0
