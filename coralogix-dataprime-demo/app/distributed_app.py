@@ -76,9 +76,9 @@ class ServiceManager:
             ("queue_worker_service", "services/queue_worker_service.py", 8017, ["external_api_service", "storage_service"]),
             ("processing_service", "services/processing_service.py", 8014, ["storage_service"]),
             ("queue_service", "services/queue_service.py", 8013, ["processing_service"]),
-            ("validation_service", "services/validation_service_simple_fixed.py", 8012, []),
-            ("query_service", "services/query_service_simple_fixed.py", 8011, []),
-            ("api_gateway", "services/api_gateway_simple_fixed.py", 8010, ["query_service", "validation_service", "queue_worker_service"])
+            ("validation_service", "services/validation_service.py", 8012, []),
+            ("query_service", "services/query_service.py", 8011, []),
+            ("api_gateway", "services/api_gateway.py", 8010, ["query_service", "validation_service", "queue_worker_service"])
         ]
     
     def start_service(self, name, script_path, port):

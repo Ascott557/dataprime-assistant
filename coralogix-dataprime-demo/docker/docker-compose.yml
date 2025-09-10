@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  dataprime-demo:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: coralogix-dataprime-demo
+    ports:
+      - "8010:8010"  # API Gateway
+      - "8011:8011"  # Query Service
+      - "8012:8012"  # Validation Service
+      - "8013:8013"  # Queue Service
+      - "8014:8014"  # Processing Service
+      - "8015:8015"  # Storage Service
+      - "8016:8016"  # External API Service
+      - "8017:8017"  # Queue Worker Service
+      - "8020:8020"  # Frontend
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - CX_TOKEN=${CX_TOKEN}
+      - CX_DOMAIN=${CX_DOMAIN:-coralogixstg.wpengine.com}
+      - CX_APPLICATION_NAME=${CX_APPLICATION_NAME:-dataprime-demo}
+      - CX_SUBSYSTEM_NAME=${CX_SUBSYSTEM_NAME:-ai-assistant}
+    volumes:
+      - ./data:/app/data  # For SQLite database persistence
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8010/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  data:
