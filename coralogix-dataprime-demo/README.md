@@ -40,6 +40,8 @@ A complete distributed AI assistant that demonstrates Coralogix's AI Center capa
 - OpenAI API Key
 - Coralogix Account with AI Center enabled
 
+> 📋 **All configuration is handled via a single `.env` file** - see `.env.example` for required variables!
+
 ### 1. Clone and Setup
 
 ```bash
@@ -49,11 +51,13 @@ cd coralogix-dataprime-demo
 
 ### 2. Configure Environment
 
+Copy the example environment file and add your credentials:
+
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` with your credentials:
+**Required Environment Variables** (edit `.env` file):
 
 ```env
 # OpenAI Configuration
@@ -61,10 +65,12 @@ OPENAI_API_KEY=your_openai_api_key_here
 
 # Coralogix Configuration  
 CX_TOKEN=your_coralogix_send_data_key_here
-CX_DOMAIN=your_coralogix_domain.com
+CX_DOMAIN=coralogix.com
 CX_APPLICATION_NAME=dataprime-demo
 CX_SUBSYSTEM_NAME=ai-assistant
 ```
+
+> 💡 **Quick Setup**: The `.env.example` file contains all required variables with placeholder values. Simply replace the placeholder values with your actual API keys.
 
 ### 3. Launch with Docker
 
