@@ -15,7 +15,7 @@ from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapProp
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from shared_telemetry_working import ensure_telemetry_initialized, get_telemetry_status
+from app.shared_telemetry import ensure_telemetry_initialized, get_telemetry_status
 
 # Initialize telemetry for this service
 telemetry_enabled = ensure_telemetry_initialized()

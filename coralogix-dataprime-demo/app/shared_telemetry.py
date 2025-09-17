@@ -22,13 +22,48 @@ def ensure_telemetry_initialized():
         from llm_tracekit import OpenAIInstrumentor, setup_export_to_coralogix
         print("✅ llm_tracekit imports successful")
         
-        # Setup Coralogix export - EXACT same config as successful test
+        # Setup Coralogix export with proper regional endpoint configuration
+        # Based on: https://coralogix.com/blog/everything-you-need-to-know-about-the-new-coralogix-endpoints/
+        cx_domain = os.getenv('CX_DOMAIN', 'eu2.coralogix.com')
+        
+        # Map domains to correct ingress endpoints with port 443
+        if cx_domain == 'us1.coralogix.com':
+            cx_endpoint = 'https://ingress.us1.coralogix.com:443'
+        elif cx_domain == 'us2.coralogix.com':
+            cx_endpoint = 'https://ingress.us2.coralogix.com:443'
+        elif cx_domain == 'eu1.coralogix.com':
+            cx_endpoint = 'https://ingress.eu1.coralogix.com:443'
+        elif cx_domain == 'eu2.coralogix.com':
+            cx_endpoint = 'https://ingress.eu2.coralogix.com:443'
+        elif cx_domain == 'ap1.coralogix.com':
+            cx_endpoint = 'https://ingress.ap1.coralogix.com:443'
+        elif cx_domain == 'ap2.coralogix.com':
+            cx_endpoint = 'https://ingress.ap2.coralogix.com:443'
+        elif cx_domain == 'ap3.coralogix.com':
+            cx_endpoint = 'https://ingress.ap3.coralogix.com:443'
+        # Legacy domain support (deprecated)
+        elif cx_domain == 'coralogix.com':
+            cx_endpoint = 'https://ingress.eu1.coralogix.com:443'  # EU1 default
+        elif cx_domain == 'coralogix.us':
+            cx_endpoint = 'https://ingress.us1.coralogix.com:443'  # US1 default
+        elif cx_domain == 'coralogix.in':
+            cx_endpoint = 'https://ingress.ap1.coralogix.com:443'  # AP1 default
+        elif cx_domain == 'coralogixsg.com':
+            cx_endpoint = 'https://ingress.ap2.coralogix.com:443'  # AP2 default
+        else:
+            # Default to EU2 for new installations
+            cx_endpoint = 'https://ingress.eu2.coralogix.com:443'
+            
+        print(f"🔧 Using Coralogix endpoint: {cx_endpoint}")
+        print(f"🔧 Application: {os.getenv('CX_APPLICATION_NAME', 'dataprime-demo')}")
+        print(f"🔧 Subsystem: {os.getenv('CX_SUBSYSTEM_NAME', 'ai-assistant')}")
+        
         setup_export_to_coralogix(
             service_name="dataprime_assistant",
-            application_name="ai-dataprime", 
-            subsystem_name="query-generator",
+            application_name=os.getenv('CX_APPLICATION_NAME', 'dataprime-demo'),
+            subsystem_name=os.getenv('CX_SUBSYSTEM_NAME', 'ai-assistant'),
             coralogix_token=os.getenv('CX_TOKEN'),
-            coralogix_endpoint=os.getenv('CX_ENDPOINT'),
+            coralogix_endpoint=cx_endpoint,
             capture_content=True
         )
         print("✅ Coralogix export configured")

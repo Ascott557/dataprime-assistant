@@ -44,7 +44,7 @@ def initialize_telemetry():
         
         # Use the same approach as the working services
         sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-        from shared_telemetry_working import ensure_telemetry_initialized
+        from shared_telemetry import ensure_telemetry_initialized
         
         result = ensure_telemetry_initialized()
         if result:
@@ -78,7 +78,8 @@ class ServiceManager:
             ("queue_service", "services/queue_service.py", 8013, ["processing_service"]),
             ("validation_service", "services/validation_service.py", 8012, []),
             ("query_service", "services/query_service.py", 8011, []),
-            ("api_gateway", "services/api_gateway.py", 8010, ["query_service", "validation_service", "queue_worker_service"])
+            ("api_gateway", "services/api_gateway.py", 8010, ["query_service", "validation_service", "queue_worker_service"]),
+            ("distributed_frontend", "app/distributed_frontend.py", 8020, ["api_gateway"])
         ]
     
     def start_service(self, name, script_path, port):
