@@ -65,12 +65,30 @@ OPENAI_API_KEY=your_openai_api_key_here
 
 # Coralogix Configuration  
 CX_TOKEN=your_coralogix_send_data_key_here
-CX_DOMAIN=coralogix.com
+CX_DOMAIN=eu2.coralogix.com
 CX_APPLICATION_NAME=dataprime-demo
 CX_SUBSYSTEM_NAME=ai-assistant
 ```
 
-> 💡 **Quick Setup**: The `.env.example` file contains all required variables with placeholder values. Simply replace the placeholder values with your actual API keys.
+### 🌍 **Coralogix Regional Configuration**
+
+**IMPORTANT**: Set `CX_DOMAIN` to match your Coralogix region. The demo uses the new regional endpoints as per [Coralogix's updated endpoint structure](https://coralogix.com/blog/everything-you-need-to-know-about-the-new-coralogix-endpoints/).
+
+| **Region** | **CX_DOMAIN Value** | **Description** |
+|------------|-------------------|-----------------|
+| 🇺🇸 **US East (Ohio)** | `us1.coralogix.com` | Primary US region |
+| 🇺🇸 **US West (Oregon)** | `us2.coralogix.com` | West Coast US |
+| 🇮🇪 **EU West (Ireland)** | `eu1.coralogix.com` | Primary EU region |
+| 🇸🇪 **EU North (Stockholm)** | `eu2.coralogix.com` | **Default** - Nordic region |
+| 🇮🇳 **Asia Pacific (Mumbai)** | `ap1.coralogix.com` | India region |
+| 🇸🇬 **Asia Pacific (Singapore)** | `ap2.coralogix.com` | Southeast Asia |
+| 🇮🇩 **Asia Pacific (Jakarta)** | `ap3.coralogix.com` | Indonesia region |
+
+**How to find your region**: Check your Coralogix team URL. For example:
+- `my-team.eu2.coralogix.com` → Use `CX_DOMAIN=eu2.coralogix.com`
+- `my-team.us1.coralogix.com` → Use `CX_DOMAIN=us1.coralogix.com`
+
+> 💡 **Quick Setup**: The `.env.example` file contains all required variables with placeholder values. Simply replace the placeholder values with your actual API keys and correct regional domain.
 
 ### 3. Launch with Docker
 
@@ -197,7 +215,7 @@ The demo automatically creates traces and logs that populate:
 |----------|-------------|---------|
 | `OPENAI_API_KEY` | OpenAI API key for AI features | Required |
 | `CX_TOKEN` | Coralogix Send Data API key | Required |
-| `CX_DOMAIN` | Coralogix domain | `coralogixstg.wpengine.com` |
+| `CX_DOMAIN` | Coralogix domain | `eu2.coralogix.com` |
 | `CX_APPLICATION_NAME` | Application name in Coralogix | `dataprime-demo` |
 | `CX_SUBSYSTEM_NAME` | Subsystem name in Coralogix | `ai-assistant` |
 
@@ -241,6 +259,45 @@ curl http://localhost:8010/api/health
 # Monitor traces
 curl http://localhost:8010/api/stats
 ```
+
+## 🔧 Troubleshooting
+
+### Telemetry Data Not Appearing in Coralogix
+
+If you're not seeing telemetry data in Coralogix:
+
+1. **Check Regional Endpoint**: Ensure `CX_DOMAIN` matches your Coralogix region
+   ```bash
+   # Verify your current setting
+   curl -s http://localhost:8010/api/health | jq .telemetry_initialized
+   ```
+
+2. **Verify Correct Endpoint Mapping**: The demo automatically maps domains to ingress endpoints:
+   - `eu2.coralogix.com` → `https://ingress.eu2.coralogix.com:443`
+   - `us1.coralogix.com` → `https://ingress.us1.coralogix.com:443`
+   - See [Coralogix endpoint documentation](https://coralogix.com/blog/everything-you-need-to-know-about-the-new-coralogix-endpoints/) for all regions
+
+3. **Test Telemetry Generation**:
+   ```bash
+   # Generate a test query and check trace ID
+   curl -X POST http://localhost:8010/api/generate-query \
+     -H "Content-Type: application/json" \
+     -d '{"user_input": "test query", "user_id": "test"}'
+   ```
+
+4. **Check Coralogix AI Center**: Look for:
+   - Application: `dataprime-demo`
+   - Subsystem: `ai-assistant`
+   - Data may take 2-5 minutes to appear
+
+### Legacy Domain Support
+
+The demo supports legacy domains but automatically redirects to new endpoints:
+- `coralogix.com` → `ingress.eu1.coralogix.com:443`
+- `coralogix.us` → `ingress.us1.coralogix.com:443`
+- `coralogix.in` → `ingress.ap1.coralogix.com:443`
+
+**Recommendation**: Use the new regional domains for best performance and future compatibility.
 
 ## 🤝 Contributing
 
