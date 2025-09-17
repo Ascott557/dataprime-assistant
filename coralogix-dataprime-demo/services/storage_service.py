@@ -207,6 +207,9 @@ def store_data():
     try:
         token, is_root = extract_and_attach_trace_context()
         
+        # Debug: Log when /store endpoint is called
+        print(f"🗄️ Storage /store endpoint called - trace context: {is_root}")
+        
         with tracer.start_as_current_span("storage_service.store_data") as span:
             span.set_attribute("service.component", "storage_service")
             span.set_attribute("operation.name", "store_data")
@@ -295,6 +298,9 @@ def store_feedback():
     try:
         token, is_root = extract_and_attach_trace_context()
         
+        # Debug: Log when /feedback endpoint is called
+        print(f"💬 Storage /feedback endpoint called - trace context: {is_root}")
+        
         with tracer.start_as_current_span("storage_service.store_feedback") as span:
             span.set_attribute("service.component", "storage_service")
             span.set_attribute("operation.name", "store_feedback")
@@ -325,34 +331,25 @@ def store_feedback():
                     "rating": data.get('rating', 0)
                 })
                 
-                # Add database connection span
-                with tracer.start_as_current_span("sqlite.connection") as conn_span:
-                    conn_span.set_attribute("db.connection_string", f"sqlite:///{DB_FILE}")
-                    conn = sqlite3.connect(DB_FILE)
-                    cursor = conn.cursor()
-                    
-                    # Execute with span
-                    with tracer.start_as_current_span("sqlite.execute") as exec_span:
-                        exec_span.set_attribute("db.statement", "INSERT INTO feedback")
-                        cursor.execute('''
-                            INSERT INTO feedback (id, user_input, generated_query, rating, comment, trace_id)
-                            VALUES (?, ?, ?, ?, ?, ?)
-                        ''', (
-                            feedback_id,
-                            data.get('user_input', ''),
-                            data.get('generated_query', ''),
-                            data.get('rating', 0),
-                            data.get('comment', ''),
-                            data.get('trace_id', '')
-                        ))
-                        exec_span.set_attribute("db.rows_affected", cursor.rowcount)
-                    
-                    # Commit with span
-                    with tracer.start_as_current_span("sqlite.commit") as commit_span:
-                        conn.commit()
-                        commit_span.set_attribute("db.operation", "COMMIT")
-                    
-                    conn.close()
+                # Simplified database operation - consistent with /store endpoint
+                # Removed excessive nested spans that were causing conflicts
+                conn = sqlite3.connect(DB_FILE)
+                cursor = conn.cursor()
+                
+                cursor.execute('''
+                    INSERT INTO feedback (id, user_input, generated_query, rating, comment, trace_id)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (
+                    feedback_id,
+                    data.get('user_input', ''),
+                    data.get('generated_query', ''),
+                    data.get('rating', 0),
+                    data.get('comment', ''),
+                    data.get('trace_id', '')
+                ))
+                
+                conn.commit()
+                conn.close()
                 
                 db_span.set_attribute("db.rows_affected", 1)
                 db_span.set_attribute("feedback.id", feedback_id)
