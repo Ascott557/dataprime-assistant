@@ -208,43 +208,45 @@ Make your best attempt to create a valid DataPrime query for any input."""
                     span.set_attribute("evaluation.policy", "permissive")
                     span.set_attribute("evaluation.enforcement", "none")
                 
-                # REAL OpenAI API call - this will be traced by LLM_tracekit
-                with tracer.start_as_current_span("query_service.openai_call") as openai_span:
-                    openai_span.set_attribute("ai.operation.name", "chat.completions")
-                    openai_span.set_attribute("ai.request.model", "gpt-4o")
-                    openai_span.set_attribute("evaluation.mode", current_mode)
-                    
-                    # This OpenAI call will be automatically instrumented by llm_tracekit
-                    response = openai_client.chat.completions.create(
-                        model="gpt-4o",
-                        messages=[
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_input}
-                        ],
-                        max_tokens=200,
-                        temperature=0.3
-                    )
-                    
-                    query = response.choices[0].message.content.strip()
-                    
-                    # Clean up any markdown formatting that might have slipped through
-                    import re
-                    query = re.sub(r'^```[\w]*\n?', '', query)  # Remove opening code blocks
-                    query = re.sub(r'\n?```$', '', query)      # Remove closing code blocks
-                    query = query.strip()
-                    
-                    # Check if query was rejected due to evaluation
-                    is_rejected = "not related to system observability" in query.lower()
-                    
-                    # Add AI-specific attributes for Coralogix AI Center
-                    openai_span.set_attribute("ai.response.content", query[:100])
-                    openai_span.set_attribute("evaluation.query_rejected", is_rejected)
-                    openai_span.set_attribute("evaluation.rejection_reason", "non_observability_topic" if is_rejected else "none")
-                    
-                    if hasattr(response, 'usage') and response.usage:
-                        openai_span.set_attribute("ai.usage.prompt_tokens", response.usage.prompt_tokens)
-                        openai_span.set_attribute("ai.usage.completion_tokens", response.usage.completion_tokens)
-                        openai_span.set_attribute("ai.usage.total_tokens", response.usage.total_tokens)
+                # REAL OpenAI API call - let llm_tracekit handle instrumentation exclusively
+                # Removed manual span wrapper to prevent duration conflicts with automatic instrumentation
+                print(f"🤖 Making OpenAI API call in {current_mode} mode...")
+                
+                # This OpenAI call will be automatically instrumented by llm_tracekit with accurate timing
+                response = openai_client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_input}
+                    ],
+                    max_tokens=200,
+                    temperature=0.3
+                )
+                
+                query = response.choices[0].message.content.strip()
+                
+                # Clean up any markdown formatting that might have slipped through
+                import re
+                query = re.sub(r'^```[\w]*\n?', '', query)  # Remove opening code blocks
+                query = re.sub(r'\n?```$', '', query)      # Remove closing code blocks
+                query = query.strip()
+                
+                # Check if query was rejected due to evaluation
+                is_rejected = "not related to system observability" in query.lower()
+                
+                # Add AI-specific attributes to the parent span (query_service.generate_query)
+                # This avoids conflicts with llm_tracekit's automatic instrumentation
+                span.set_attribute("ai.response.content", query[:100])
+                span.set_attribute("evaluation.query_rejected", is_rejected)
+                span.set_attribute("evaluation.rejection_reason", "non_observability_topic" if is_rejected else "none")
+                span.set_attribute("ai.operation.name", "chat.completions")
+                span.set_attribute("ai.request.model", "gpt-4o")
+                span.set_attribute("evaluation.mode", current_mode)
+                
+                if hasattr(response, 'usage') and response.usage:
+                    span.set_attribute("ai.usage.prompt_tokens", response.usage.prompt_tokens)
+                    span.set_attribute("ai.usage.completion_tokens", response.usage.completion_tokens)
+                    span.set_attribute("ai.usage.total_tokens", response.usage.total_tokens)
                 
                 # Classify intent for demo purposes
                 intent = "error_analysis" if "error" in user_input.lower() else "general_query"
