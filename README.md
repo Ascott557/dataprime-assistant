@@ -38,7 +38,7 @@ A complete distributed AI assistant that demonstrates Coralogix's AI Center capa
 
 - Docker and Docker Compose
 - OpenAI API Key
-- Coralogix Account with AI Center enabled
+- Coralogix Account with AI Center enabled you can sign up for a free trial here https://dashboard.app.cx498.coralogix.com/#/signup
 
 > 📋 **All configuration is handled via a single `.env` file** - see `.env.example` for required variables!
 
