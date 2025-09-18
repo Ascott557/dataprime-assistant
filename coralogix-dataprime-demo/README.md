@@ -2,6 +2,8 @@
 
 A complete distributed AI assistant that demonstrates Coralogix's AI Center capabilities with OpenTelemetry tracing, DataPrime query generation, and real-time observability.
 
+> 📄 **Open Source**: This project is released under the MIT License as Authorized Open Source software by Coralogix Ltd.
+
 ## ✨ Features
 
 - **🤖 AI-Powered Query Generation**: Convert natural language to DataPrime queries
@@ -310,7 +312,27 @@ This demo showcases Coralogix AI Center capabilities. To contribute:
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License - see the [LICENSE](../LICENSE) file for details.
+
+### Open Source Compliance
+
+This software is released as **Authorized Open Source** under Coralogix's Open-Source Policy (April 2024):
+
+- **Copyright**: Copyright (c) 2024 Coralogix Ltd.
+- **License**: MIT License
+- **Status**: All proprietary rights waived, software enters public domain
+- **Usage**: Free to use, modify, distribute, and incorporate into other projects
+
+### Third-Party Dependencies
+
+This project uses various open-source libraries. See `requirements.txt` for a complete list. All dependencies are compatible with the MIT License:
+
+- **OpenAI SDK**: Apache 2.0 License
+- **OpenTelemetry**: Apache 2.0 License  
+- **Flask**: BSD-3-Clause License
+- **Other dependencies**: Various permissive licenses
+
+For detailed license information of each dependency, please check their respective repositories.
 
 ## 🆘 Support
 

@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+"""
+Copyright (c) 2024 Coralogix Ltd.
+
+Licensed under the MIT License. See LICENSE file in the project root
+for full license information.
+
+This file is part of the Coralogix DataPrime AI Assistant Demo.
+"""
+
+
 """Working telemetry - exactly like the successful direct test"""
 import os
 from dotenv import load_dotenv
