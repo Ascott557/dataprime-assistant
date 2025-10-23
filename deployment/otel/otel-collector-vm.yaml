@@ -1,0 +1,238 @@
+# OpenTelemetry Collector Configuration for DataPrime Assistant VM Deployment
+# Optimized for t3.small (2GB RAM) with cost-effective settings
+# Coralogix Company ID: 4015437
+
+receivers:
+  # Host metrics collection for Coralogix Infrastructure Monitoring
+  hostmetrics:
+    collection_interval: 30s  # 30s for demo responsiveness (change to 60s for production cost optimization)
+    root_path: /hostfs  # CRITICAL: Must mount host root filesystem at /hostfs in Docker
+    scrapers:
+      # CPU metrics (utilization, time spent in different states)
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
+      
+      # Disk I/O metrics
+      disk:
+        metrics:
+          system.disk.io:
+            enabled: true
+          system.disk.operations:
+            enabled: true
+      
+      # Filesystem usage and utilization
+      filesystem:
+        metrics:
+          system.filesystem.usage:
+            enabled: true
+          system.filesystem.utilization:
+            enabled: true
+        # Exclude virtual/temporary filesystems to reduce noise
+        exclude_fs_types:
+          fs_types:
+            - overlay
+            - tmpfs
+            - devtmpfs
+            - squashfs
+            - iso9660
+        exclude_mount_points:
+          mount_points:
+            - /dev
+            - /proc
+            - /sys
+            - /var/lib/docker/containers
+      
+      # System load averages (1m, 5m, 15m)
+      load:
+        cpu_average: true
+      
+      # Memory usage and utilization
+      memory:
+        metrics:
+          system.memory.usage:
+            enabled: true
+          system.memory.utilization:
+            enabled: true
+      
+      # Network I/O, errors, and connections
+      network:
+        metrics:
+          system.network.io:
+            enabled: true
+          system.network.errors:
+            enabled: true
+          system.network.connections:
+            enabled: true
+      
+      # Process metrics (CPU, memory per process)
+      # NOTE: Can be resource intensive, enable for deep debugging only
+      process:
+        metrics:
+          process.cpu.time:
+            enabled: true
+          process.memory.usage:
+            enabled: true
+        # Monitor key processes
+        include:
+          names:
+            - dockerd
+            - python
+            - nginx
+            - postgres
+            - redis-server
+  
+  # OTLP receiver for application traces and metrics
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Memory limiter to prevent OOM on t3.small (2GB RAM)
+  # CRITICAL: Set to 512MB (25% of total RAM) per critique feedback
+  memory_limiter:
+    limit_mib: 512
+    spike_limit_mib: 128
+    check_interval: 1s
+  
+  # Batch processor for cost efficiency (reduces API calls)
+  batch:
+    send_batch_size: 512  # Reduced from 1024 for t3.small memory constraints
+    timeout: 10s
+    send_batch_max_size: 1024
+  
+  # AWS EC2 resource detection for Infrastructure Explorer integration
+  resourcedetection/ec2:
+    detectors:
+      - env      # Environment variables
+      - ec2      # AWS EC2 metadata API
+      - system   # System/hostname info
+    ec2:
+      # Fetch EC2 tags for enrichment
+      tags:
+        - ^tag:Name
+        - ^tag:Environment
+        - ^tag:Application
+        - ^tag:Team
+    timeout: 5s
+    override: true  # Override existing resource attributes
+  
+  # Add resource attributes for all telemetry
+  resource:
+    attributes:
+      - key: deployment.environment
+        value: ${env:ENVIRONMENT}
+        action: upsert
+      - key: service.namespace
+        value: dataprime-demo
+        action: upsert
+      - key: coralogix.company.id
+        value: "4015437"
+        action: upsert
+
+exporters:
+  # Coralogix exporter (correct format per critique)
+  coralogix:
+    domain: "${env:CX_DOMAIN}"  # coralogix.com
+    private_key: "${env:CX_TOKEN}"
+    application_name: "${env:CX_APPLICATION_NAME}"  # dataprime-demo
+    subsystem_name: "${env:CX_SUBSYSTEM_NAME}"      # infrastructure
+    timeout: 30s
+    
+    # Compression for cost optimization
+    compression: gzip
+    
+    # Retry configuration
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+    
+    # Queue settings for reliability
+    sending_queue:
+      enabled: true
+      num_consumers: 10
+      queue_size: 1000
+  
+  # Prometheus exporter for local debugging and verification
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: dataprime_demo
+    const_labels:
+      environment: ${env:ENVIRONMENT}
+      deployment: vm
+  
+  # Logging exporter for troubleshooting (disable in production)
+  logging:
+    loglevel: info
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+service:
+  # Performance tuning for t3.small
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888  # Collector's own metrics
+  
+  # Pipeline definitions
+  pipelines:
+    # Traces pipeline (application distributed tracing)
+    traces:
+      receivers:
+        - otlp
+      processors:
+        - memory_limiter
+        - resourcedetection/ec2
+        - resource
+        - batch
+      exporters:
+        - coralogix
+        # - logging  # Uncomment for debugging
+    
+    # Metrics pipeline (host metrics + custom application metrics)
+    metrics:
+      receivers:
+        - hostmetrics
+        - otlp
+      processors:
+        - memory_limiter
+        - resourcedetection/ec2
+        - resource
+        - batch
+      exporters:
+        - coralogix
+        - prometheus  # Local Prometheus endpoint for debugging
+        # - logging  # Uncomment for debugging
+    
+    # Logs pipeline (structured application logs)
+    logs:
+      receivers:
+        - otlp
+      processors:
+        - memory_limiter
+        - resourcedetection/ec2
+        - resource
+        - batch
+      exporters:
+        - coralogix
+        # - logging  # Uncomment for debugging
+
+# Extensions (optional health check and monitoring)
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  
+  pprof:
+    endpoint: 0.0.0.0:1777
+  
+  zpages:
+    endpoint: 0.0.0.0:55679
+

@@ -1,0 +1,482 @@
+version: '3.8'
+
+# DataPrime Assistant - Production VM Deployment
+# Optimized for t3.small (2 vCPU, 2GB RAM)
+# Total container memory allocation: ~1.9GB (leaving ~100MB for system)
+
+services:
+  # OpenTelemetry Collector - Central telemetry hub
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.91.0
+    container_name: otel-collector
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ../otel/otel-collector-vm.yaml:/etc/otel-collector-config.yaml:ro
+      - /:/hostfs:ro  # CRITICAL: Mount host root for hostmetrics receiver
+      - /var/run/docker.sock:/var/run/docker.sock:ro  # Docker metrics
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "8888:8888"   # Collector's own metrics
+      - "8889:8889"   # Prometheus exporter
+      - "13133:13133" # Health check
+      - "55679:55679" # zpages
+    environment:
+      - CX_TOKEN=${CX_TOKEN}
+      - CX_DOMAIN=${CX_DOMAIN:-coralogix.com}
+      - CX_APPLICATION_NAME=${CX_APPLICATION_NAME:-dataprime-demo}
+      - CX_SUBSYSTEM_NAME=${CX_SUBSYSTEM_NAME:-infrastructure}
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M  # Increased from 256M per critique
+        reservations:
+          memory: 256M
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:13133"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - dataprime-network
+
+  # PostgreSQL 15 - Primary database
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-dataprime}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB:-dataprime_demo}
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    ports:
+      - "5432:5432"
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M  # Highest allocation for database
+        reservations:
+          memory: 256M
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dataprime} -d ${POSTGRES_DB:-dataprime_demo}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - dataprime-network
+
+  # Redis 7 - Distributed cache and session store
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    command: redis-server --appendonly yes --maxmemory 100mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+        reservations:
+          memory: 64M
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - dataprime-network
+
+  # API Gateway - Main entry point (Port 8010)
+  api-gateway:
+    build:
+      context: ../../coralogix-dataprime-demo
+      dockerfile: services/api-gateway/Dockerfile
+    container_name: api-gateway
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - CX_TOKEN=${CX_TOKEN}
+      - CX_DOMAIN=${CX_DOMAIN:-coralogix.com}
+      - CX_APPLICATION_NAME=${CX_APPLICATION_NAME:-dataprime-demo}
+      - CX_SUBSYSTEM_NAME=api-gateway
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+      - OTEL_SERVICE_NAME=api-gateway
+    ports:
+      - "8010:8010"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+        reservations:
+          memory: 64M
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      otel-collector:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8010/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - dataprime-network
+
+  # Query Service - DataPrime query generation (Port 8011)
+  query-service:
+    build:
+      context: ../../coralogix-dataprime-demo
+      dockerfile: services/query-service/Dockerfile
+    container_name: query-service
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - CX_TOKEN=${CX_TOKEN}
+      - CX_DOMAIN=${CX_DOMAIN:-coralogix.com}
+      - CX_APPLICATION_NAME=${CX_APPLICATION_NAME:-dataprime-demo}
+      - CX_SUBSYSTEM_NAME=query-service
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+      - OTEL_SERVICE_NAME=query-service
+    ports:
+      - "8011:8011"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+        reservations:
+          memory: 64M
+    restart: unless-stopped
+    depends_on:
+      otel-collector:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8011/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - dataprime-network
+
+  # Validation Service - Query validation (Port 8012)
+  validation-service:
+    build:
+      context: ../../coralogix-dataprime-demo
+      dockerfile: services/validation-service/Dockerfile
+    container_name: validation-service
+    environment:
+      - CX_TOKEN=${CX_TOKEN}
+      - CX_DOMAIN=${CX_DOMAIN:-coralogix.com}
+      - CX_APPLICATION_NAME=${CX_APPLICATION_NAME:-dataprime-demo}
+      - CX_SUBSYSTEM_NAME=validation-service
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+      - OTEL_SERVICE_NAME=validation-service
+    ports:
+      - "8012:8012"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+        reservations:
+          memory: 64M
+    restart: unless-stopped
+    depends_on:
+      otel-collector:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8012/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - dataprime-network
+
+  # Queue Service - Message queue (Port 8013)
+  queue-service:
+    build:
+      context: ../../coralogix-dataprime-demo
+      dockerfile: services/queue-service/Dockerfile
+    container_name: queue-service
+    environment:
+      - CX_TOKEN=${CX_TOKEN}
+      - CX_DOMAIN=${CX_DOMAIN:-coralogix.com}
+      - CX_APPLICATION_NAME=${CX_APPLICATION_NAME:-dataprime-demo}
+      - CX_SUBSYSTEM_NAME=queue-service
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+      - OTEL_SERVICE_NAME=queue-service
+    ports:
+      - "8013:8013"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+        reservations:
+          memory: 64M
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      otel-collector:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8013/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - dataprime-network
+
+  # Processing Service - Background processing (Port 8014)
+  processing-service:
+    build:
+      context: ../../coralogix-dataprime-demo
+      dockerfile: services/processing-service/Dockerfile
+    container_name: processing-service
+    environment:
+      - CX_TOKEN=${CX_TOKEN}
+      - CX_DOMAIN=${CX_DOMAIN:-coralogix.com}
+      - CX_APPLICATION_NAME=${CX_APPLICATION_NAME:-dataprime-demo}
+      - CX_SUBSYSTEM_NAME=processing-service
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+      - OTEL_SERVICE_NAME=processing-service
+    ports:
+      - "8014:8014"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+        reservations:
+          memory: 64M
+    restart: unless-stopped
+    depends_on:
+      otel-collector:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8014/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - dataprime-network
+
+  # Storage Service - Database operations (Port 8015)
+  storage-service:
+    build:
+      context: ../../coralogix-dataprime-demo
+      dockerfile: services/storage-service/Dockerfile
+    container_name: storage-service
+    environment:
+      - CX_TOKEN=${CX_TOKEN}
+      - CX_DOMAIN=${CX_DOMAIN:-coralogix.com}
+      - CX_APPLICATION_NAME=${CX_APPLICATION_NAME:-dataprime-demo}
+      - CX_SUBSYSTEM_NAME=storage-service
+      - DATABASE_URL=${DATABASE_URL}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+      - OTEL_SERVICE_NAME=storage-service
+    ports:
+      - "8015:8015"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+        reservations:
+          memory: 64M
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      otel-collector:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8015/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - dataprime-network
+
+  # External API Service - External integrations (Port 8016)
+  external-api-service:
+    build:
+      context: ../../coralogix-dataprime-demo
+      dockerfile: services/external-api-service/Dockerfile
+    container_name: external-api-service
+    environment:
+      - CX_TOKEN=${CX_TOKEN}
+      - CX_DOMAIN=${CX_DOMAIN:-coralogix.com}
+      - CX_APPLICATION_NAME=${CX_APPLICATION_NAME:-dataprime-demo}
+      - CX_SUBSYSTEM_NAME=external-api-service
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+      - OTEL_SERVICE_NAME=external-api-service
+    ports:
+      - "8016:8016"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+        reservations:
+          memory: 64M
+    restart: unless-stopped
+    depends_on:
+      otel-collector:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8016/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - dataprime-network
+
+  # Queue Worker Service - Async job processing (Port 8017)
+  queue-worker-service:
+    build:
+      context: ../../coralogix-dataprime-demo
+      dockerfile: services/queue-worker-service/Dockerfile
+    container_name: queue-worker-service
+    environment:
+      - CX_TOKEN=${CX_TOKEN}
+      - CX_DOMAIN=${CX_DOMAIN:-coralogix.com}
+      - CX_APPLICATION_NAME=${CX_APPLICATION_NAME:-dataprime-demo}
+      - CX_SUBSYSTEM_NAME=queue-worker-service
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+      - OTEL_SERVICE_NAME=queue-worker-service
+    ports:
+      - "8017:8017"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+        reservations:
+          memory: 64M
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      otel-collector:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8017/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - dataprime-network
+
+  # Frontend - Web UI (Port 8020)
+  frontend:
+    build:
+      context: ../../coralogix-dataprime-demo
+      dockerfile: app/Dockerfile.frontend
+    container_name: frontend
+    environment:
+      - CX_TOKEN=${CX_TOKEN}
+      - CX_DOMAIN=${CX_DOMAIN:-coralogix.com}
+      - CX_APPLICATION_NAME=${CX_APPLICATION_NAME:-dataprime-demo}
+      - CX_SUBSYSTEM_NAME=frontend
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+      - OTEL_SERVICE_NAME=frontend
+    ports:
+      - "8020:8020"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+        reservations:
+          memory: 64M
+    restart: unless-stopped
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+      otel-collector:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8020/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - dataprime-network
+
+  # NGINX - Reverse proxy and SSL termination
+  nginx:
+    image: nginx:alpine
+    container_name: nginx
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - nginx-logs:/var/log/nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 64M
+        reservations:
+          memory: 32M
+    restart: unless-stopped
+    depends_on:
+      - frontend
+      - api-gateway
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - dataprime-network
+
+networks:
+  dataprime-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  postgres-data:
+    driver: local
+  redis-data:
+    driver: local
+  nginx-logs:
+    driver: local
+

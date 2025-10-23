@@ -28,7 +28,6 @@ def ensure_telemetry_initialized():
     try:
         print("🔧 Initializing telemetry like successful direct test...")
         
-        # Import only what we know works
         from llm_tracekit import OpenAIInstrumentor, setup_export_to_coralogix
         print("✅ llm_tracekit imports successful")
         
