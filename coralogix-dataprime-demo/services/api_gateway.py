@@ -38,11 +38,11 @@ tracer = trace.get_tracer(__name__)
 app = Flask(__name__)
 CORS(app)  # Enable CORS for frontend access
 
-# Service endpoints
-QUERY_SERVICE_URL = "http://localhost:8011"
-VALIDATION_SERVICE_URL = "http://localhost:8012"
-QUEUE_WORKER_SERVICE_URL = "http://localhost:8017"
-STORAGE_SERVICE_URL = "http://localhost:8015"  # For database operations
+# Service endpoints (use Docker service names for container networking)
+QUERY_SERVICE_URL = os.getenv("QUERY_SERVICE_URL", "http://query-service:8011")
+VALIDATION_SERVICE_URL = os.getenv("VALIDATION_SERVICE_URL", "http://validation-service:8012")
+QUEUE_WORKER_SERVICE_URL = os.getenv("QUEUE_WORKER_SERVICE_URL", "http://queue-worker-service:8017")
+STORAGE_SERVICE_URL = os.getenv("STORAGE_SERVICE_URL", "http://storage-service:8015")
 
 # Gateway statistics with demo mode support
 gateway_stats = {

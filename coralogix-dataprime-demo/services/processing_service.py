@@ -285,8 +285,9 @@ def process_data():
                         "processed_at": datetime.now().isoformat()
                     }
                     
+                    storage_service_url = os.getenv("STORAGE_SERVICE_URL", "http://storage-service:8015")
                     storage_response = requests.post(
-                        "http://localhost:8015/store",
+                        f"{storage_service_url}/store",
                         json=storage_data,
                         headers=headers,
                         timeout=5

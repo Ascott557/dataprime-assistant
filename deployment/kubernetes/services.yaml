@@ -1,0 +1,167 @@
+---
+# API Gateway Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway
+  namespace: dataprime-demo
+  labels:
+    app: api-gateway
+spec:
+  type: NodePort
+  ports:
+    - port: 8010
+      targetPort: 8010
+      nodePort: 30010
+      protocol: TCP
+      name: http
+  selector:
+    app: api-gateway
+---
+# Query Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: query-service
+  namespace: dataprime-demo
+  labels:
+    app: query-service
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8011
+      targetPort: 8011
+      protocol: TCP
+      name: http
+  selector:
+    app: query-service
+---
+# Validation Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: validation-service
+  namespace: dataprime-demo
+  labels:
+    app: validation-service
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8012
+      targetPort: 8012
+      protocol: TCP
+      name: http
+  selector:
+    app: validation-service
+---
+# Queue Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: queue-service
+  namespace: dataprime-demo
+  labels:
+    app: queue-service
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8013
+      targetPort: 8013
+      protocol: TCP
+      name: http
+  selector:
+    app: queue-service
+---
+# Processing Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: processing-service
+  namespace: dataprime-demo
+  labels:
+    app: processing-service
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8014
+      targetPort: 8014
+      protocol: TCP
+      name: http
+  selector:
+    app: processing-service
+---
+# Storage Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: storage-service
+  namespace: dataprime-demo
+  labels:
+    app: storage-service
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8015
+      targetPort: 8015
+      protocol: TCP
+      name: http
+  selector:
+    app: storage-service
+---
+# External API Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: external-api-service
+  namespace: dataprime-demo
+  labels:
+    app: external-api-service
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8016
+      targetPort: 8016
+      protocol: TCP
+      name: http
+  selector:
+    app: external-api-service
+---
+# Queue Worker Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: queue-worker-service
+  namespace: dataprime-demo
+  labels:
+    app: queue-worker-service
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8017
+      targetPort: 8017
+      protocol: TCP
+      name: http
+  selector:
+    app: queue-worker-service
+---
+# Frontend Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: dataprime-demo
+  labels:
+    app: frontend
+spec:
+  type: NodePort
+  ports:
+    - port: 8020
+      targetPort: 8020
+      nodePort: 30020
+      protocol: TCP
+      name: http
+  selector:
+    app: frontend
+
+
+

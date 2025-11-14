@@ -92,8 +92,9 @@ def background_worker():
                         propagator = TraceContextTextMapPropagator()
                         propagator.inject(headers)
                         
+                        processing_service_url = os.getenv("PROCESSING_SERVICE_URL", "http://processing-service:8014")
                         processing_response = requests.post(
-                            "http://localhost:8014/process",
+                            f"{processing_service_url}/process",
                             json=message.get("data", {}),
                             headers=headers,
                             timeout=10

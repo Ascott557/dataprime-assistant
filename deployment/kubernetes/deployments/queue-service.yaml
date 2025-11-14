@@ -1,0 +1,85 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: queue-service
+  namespace: dataprime-demo
+  labels:
+    app: queue-service
+    service: queue-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: queue-service
+  template:
+    metadata:
+      labels:
+        app: queue-service
+        service: queue-service
+    spec:
+      containers:
+        - name: queue-service
+          image: dataprime-queue-service:latest
+          imagePullPolicy: Never
+          env:
+            - name: HOST_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: CX_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: dataprime-secrets
+                  key: CX_TOKEN
+            - name: CX_DOMAIN
+              valueFrom:
+                configMapKeyRef:
+                  name: dataprime-config
+                  key: CX_DOMAIN
+            - name: CX_APPLICATION_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: dataprime-config
+                  key: CX_APPLICATION_NAME
+            - name: CX_SUBSYSTEM_NAME
+              value: "queue-service"
+            - name: REDIS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: dataprime-config
+                  key: REDIS_URL
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: dataprime-config
+                  key: OTEL_EXPORTER_OTLP_ENDPOINT
+            - name: OTEL_SERVICE_NAME
+              value: "queue-service"
+            - name: SERVICE_NAME
+              value: "queue-service"
+            - name: SERVICE_VERSION
+              value: "1.0.0"
+          ports:
+            - containerPort: 8013
+              name: http
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "250m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8013
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8013
+            initialDelaySeconds: 20
+            periodSeconds: 10
+

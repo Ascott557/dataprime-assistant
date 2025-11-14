@@ -46,6 +46,6 @@ aiohttp>=3.10.0
 # Additional dependencies for distributed system
 opentelemetry-instrumentation-requests>=0.48b0
 
-# Database and caching (Phase 1-2: PostgreSQL + Redis)
-psycopg2-binary==2.9.9  # PostgreSQL adapter
+# Database and caching (Phase 1-2: SQLite + Redis)
+# SQLite is built into Python - no additional dependencies needed
 redis==5.0.1  # Redis client for distributed caching

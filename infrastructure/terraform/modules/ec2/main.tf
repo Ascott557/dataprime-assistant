@@ -1,10 +1,17 @@
-# EC2 Module - t3.small instance for cost optimization
-# ~$15/month for demo purposes
+/**
+ * EC2 Module - Cost-Optimized Instance
+ * 
+ * Creates:
+ * - t3.small EC2 instance (2 vCPU, 2GB RAM)
+ * - 30GB gp3 root volume
+ * - Elastic IP for stable public access
+ * - Bootstrap script via user_data
+ */
 
-# Data source for latest Ubuntu 22.04 LTS AMI
+# Data source to get latest Ubuntu 22.04 LTS AMI
 data "aws_ami" "ubuntu" {
   most_recent = true
-  owners      = ["099720109477"]  # Canonical
+  owners      = ["099720109477"] # Canonical
 
   filter {
     name   = "name"
@@ -17,114 +24,78 @@ data "aws_ami" "ubuntu" {
   }
 }
 
+# Render bootstrap script template using templatefile function
+locals {
+  bootstrap_script = templatefile("${path.module}/../../user-data/bootstrap.sh.tpl", {
+    coralogix_token        = var.coralogix_token
+    coralogix_domain       = var.coralogix_domain
+    coralogix_app_name     = var.coralogix_app_name
+    coralogix_subsystem    = var.coralogix_subsystem
+    openai_api_key         = var.openai_api_key
+    redis_url              = var.redis_url
+    otel_endpoint          = var.otel_endpoint
+    project_name           = var.project_name
+    environment            = var.environment
+    repository_url         = var.repository_url
+  })
+}
+
 # EC2 Instance
 resource "aws_instance" "main" {
-  ami                    = var.ami_id != "" ? var.ami_id : data.aws_ami.ubuntu.id
+  ami                    = data.aws_ami.ubuntu.id
   instance_type          = var.instance_type
   subnet_id              = var.subnet_id
   vpc_security_group_ids = [var.security_group_id]
-  iam_instance_profile   = var.iam_instance_profile
   key_name               = var.key_name
-  
-  # User data for bootstrapping
-  user_data = var.user_data
-  
+  iam_instance_profile   = var.iam_instance_profile_name
+
   # Root volume configuration
   root_block_device {
-    volume_type           = "gp3"  # Cheaper and faster than gp2
+    volume_type           = "gp3"
     volume_size           = var.root_volume_size
     delete_on_termination = true
     encrypted             = true
+
+    tags = {
+      Name = "${var.project_name}-root-volume"
+    }
+  }
+
+  # User data for bootstrapping
+  user_data = local.bootstrap_script
+
+  # Disable detailed monitoring (cost savings)
+  monitoring = false
+
+  # Enable termination protection in production
+  disable_api_termination = false
+
+  tags = {
+    Name        = "${var.project_name}-instance"
+    Environment = var.environment
+    Application = "dataprime-demo"
+    ManagedBy   = "terraform"
     
-    tags = merge(
-      var.tags,
-      {
-        Name = "${var.project_name}-root-volume-${var.environment}"
-      }
-    )
+    # Coralogix metadata enrichment tags
+    CX_Application = var.coralogix_app_name
+    CX_Subsystem   = var.coralogix_subsystem
   }
-  
-  # Disable detailed monitoring to save costs
-  monitoring = var.enable_detailed_monitoring
-  
-  # Enable termination protection for production
-  disable_api_termination = var.environment == "prod" ? true : false
-  
-  # Instance metadata options (IMDSv2)
-  metadata_options {
-    http_endpoint               = "enabled"
-    http_tokens                 = "required"  # Enforce IMDSv2
-    http_put_response_hop_limit = 1
-    instance_metadata_tags      = "enabled"
-  }
-  
-  # Credit specification for t3 instances
-  credit_specification {
-    cpu_credits = "standard"  # Use "unlimited" if you need burst performance
-  }
-  
-  tags = merge(
-    var.tags,
-    {
-      Name = "${var.project_name}-instance-${var.environment}"
-      Type = "application-server"
-    }
-  )
-  
-  volume_tags = merge(
-    var.tags,
-    {
-      Name = "${var.project_name}-volume-${var.environment}"
-    }
-  )
-  
+
+  # Wait for instance to be ready before considering it created
   lifecycle {
-    ignore_changes = [
-      user_data,  # Prevent recreation on user_data changes
-      ami         # Prevent recreation on AMI updates
-    ]
+    create_before_destroy = false
   }
 }
 
-# Elastic IP for stable public address
+# Elastic IP for stable public access
 resource "aws_eip" "main" {
-  count    = var.create_elastic_ip ? 1 : 0
-  instance = aws_instance.main.id
   domain   = "vpc"
-  
-  tags = merge(
-    var.tags,
-    {
-      Name = "${var.project_name}-eip-${var.environment}"
-    }
-  )
-  
+  instance = aws_instance.main.id
+
+  tags = {
+    Name = "${var.project_name}-eip"
+  }
+
+  # Ensure instance is created first
   depends_on = [aws_instance.main]
 }
-
-# CloudWatch Alarm for high CPU (optional, disabled by default for cost)
-resource "aws_cloudwatch_metric_alarm" "high_cpu" {
-  count               = var.enable_cpu_alarm ? 1 : 0
-  alarm_name          = "${var.project_name}-high-cpu-${var.environment}"
-  comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = "2"
-  metric_name         = "CPUUtilization"
-  namespace           = "AWS/EC2"
-  period              = "300"
-  statistic           = "Average"
-  threshold           = "80"
-  alarm_description   = "This metric monitors EC2 CPU utilization"
-  alarm_actions       = []  # Add SNS topic ARN if you want notifications
-  
-  dimensions = {
-    InstanceId = aws_instance.main.id
-  }
-  
-  tags = merge(
-    var.tags,
-    {
-      Name = "${var.project_name}-high-cpu-alarm-${var.environment}"
-    }
-  )
-}
-

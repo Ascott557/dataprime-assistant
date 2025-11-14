@@ -1,0 +1,15 @@
+# Paste your values here:
+
+# From your .env file
+coralogix_token  = "YOUR_CX_TOKEN_HERE"
+
+# OpenAI API key (if you have one, otherwise leave as empty string)
+openai_api_key   = "YOUR_OPENAI_KEY_OR_EMPTY"
+
+# Your public IP for SSH access (run: curl https://checkip.amazonaws.com)
+allowed_ssh_cidr = "YOUR.IP.ADDRESS.HERE/32"
+
+# Optional: customize these if needed
+# aws_region = "us-east-1"
+# instance_type = "t3.small"
+# coralogix_domain = "coralogix.com"

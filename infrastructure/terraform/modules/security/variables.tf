@@ -1,33 +1,25 @@
-# Security Module Variables
-
 variable "project_name" {
   description = "Project name for resource naming"
   type        = string
 }
 
-variable "environment" {
-  description = "Environment name"
-  type        = string
-}
-
 variable "vpc_id" {
-  description = "ID of the VPC"
+  description = "VPC ID where security group will be created"
   type        = string
 }
 
 variable "allowed_ssh_cidr" {
-  description = "CIDR block allowed for SSH access"
+  description = "CIDR block allowed to SSH (your IP/32)"
   type        = string
 }
 
 variable "coralogix_company_id" {
-  description = "Coralogix Company ID for Infrastructure Explorer"
+  description = "Coralogix company ID for IAM role trust"
   type        = string
 }
 
-variable "tags" {
-  description = "Common tags to apply to all resources"
-  type        = map(string)
-  default     = {}
+variable "coralogix_aws_account_id" {
+  description = "Coralogix AWS account ID for cross-account access"
+  type        = string
+  default     = "625240141681" # Coralogix production AWS account
 }
-

@@ -27,9 +27,9 @@ tracer = trace.get_tracer(__name__)
 
 app = Flask(__name__)
 
-# Service endpoints
-EXTERNAL_API_SERVICE_URL = "http://localhost:8016"
-STORAGE_SERVICE_URL = "http://localhost:8015"
+# Service endpoints (use Docker service names for container networking)
+EXTERNAL_API_SERVICE_URL = os.getenv("EXTERNAL_API_SERVICE_URL", "http://external-api-service:8016")
+STORAGE_SERVICE_URL = os.getenv("STORAGE_SERVICE_URL", "http://storage-service:8015")
 
 def extract_trace_context():
     """Extract trace context from incoming request headers."""

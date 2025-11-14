@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+COPY requirements-minimal.txt requirements.txt
 RUN pip install --user --no-cache-dir --no-warn-script-location \
     -r requirements.txt
 
@@ -21,16 +21,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /root/.local /root/.local
-COPY app/ ./app/
-COPY services/validation_service.py ./services/
+RUN useradd -m -u 1000 appuser
 
-RUN useradd -m -u 1000 appuser && \
-    chown -R appuser:appuser /app
+COPY --from=builder --chown=appuser:appuser /root/.local /home/appuser/.local
+COPY --chown=appuser:appuser app/ ./app/
+COPY --chown=appuser:appuser services/validation_service.py ./services/
+
 
 USER appuser
 
-ENV PATH=/root/.local/bin:$PATH
+ENV PATH=/home/appuser/.local/bin:$PATH
 ENV PYTHONUNBUFFERED=1
 
 EXPOSE 8012

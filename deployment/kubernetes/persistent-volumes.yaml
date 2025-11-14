@@ -1,0 +1,17 @@
+---
+# PersistentVolumeClaim for SQLite database (shared between api-gateway and storage-service)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sqlite-data
+  namespace: dataprime-demo
+  labels:
+    app: dataprime-demo
+spec:
+  accessModes:
+    - ReadWriteOnce  # Only one pod (api-gateway) can access
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 2Gi
+
