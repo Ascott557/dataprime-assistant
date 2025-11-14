@@ -248,7 +248,9 @@ def index():
     <!-- Simplified Session Management without External CDN -->
     <script>
         // Global variables
-        window.API_GATEWAY_URL = 'http://localhost:8010';
+        // Dynamically set API Gateway URL based on current hostname
+        // Use port 30010 for API Gateway when accessed via NodePort
+        window.API_GATEWAY_URL = window.location.protocol + '//' + window.location.hostname + ':30010';
         window.currentQuery = null;
         window.userSessionSpan = null;
         window.userSessionContext = null;

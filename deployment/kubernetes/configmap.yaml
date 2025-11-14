@@ -1,0 +1,25 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dataprime-config
+  namespace: dataprime-demo
+  labels:
+    app: dataprime-demo
+data:
+  # Coralogix Configuration
+  CX_DOMAIN: "eu2.coralogix.com"
+  CX_APPLICATION_NAME: "dataprime-demo"
+  
+  # Redis Configuration
+  REDIS_URL: "redis://redis:6379/0"
+  
+  # OpenTelemetry Configuration
+  # Send to agent daemonset (has k8sattributes processor for pod metadata enrichment)
+  # Using hostPort so each pod sends to the agent running on its node
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://$(HOST_IP):4317"
+  
+  # Environment
+  ENVIRONMENT: "production"
+  PROJECT_NAME: "dataprime-demo"
+

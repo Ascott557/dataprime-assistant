@@ -1,0 +1,74 @@
+[0;34m======================================================================
+DataPrime Demo - k3s Deployment
+======================================================================\033[0m
+
+[1;33m[1/9] Retrieving EC2 instance information...[0m
+[0;32m✓ Instance IP: 100.26.165.219[0m
+[0;32m✓ SSH key ready[0m
+[1;33m⚠ OpenAI API key is empty - some features may be limited[0m
+[0;32m✓ API credentials loaded[0m
+
+[1;33m[2/9] Testing SSH connection...[0m
+SSH connection successful
+[0;32m✓ SSH connection successful[0m
+
+[1;33m[3/9] Stopping Docker Compose services and backing up data...[0m
+Checking if Docker Compose is running...
+No Docker Compose services running
+✓ Cleanup complete
+[0;32m✓ Docker Compose stopped and data backed up[0m
+
+[1;33m[4/9] Installing k3s on EC2 instance...[0m
+Installing k3s...
+[INFO]  Finding release for channel stable
+[INFO]  Using v1.33.5+k3s1 as release
+[INFO]  Downloading hash https://github.com/k3s-io/k3s/releases/download/v1.33.5+k3s1/sha256sum-amd64.txt
+[INFO]  Downloading binary https://github.com/k3s-io/k3s/releases/download/v1.33.5+k3s1/k3s
+[INFO]  Verifying binary download
+[INFO]  Installing k3s to /usr/local/bin/k3s
+[INFO]  Skipping installation of SELinux RPM
+[INFO]  Creating /usr/local/bin/kubectl symlink to k3s
+[INFO]  Creating /usr/local/bin/crictl symlink to k3s
+[INFO]  Skipping /usr/local/bin/ctr symlink to k3s, command exists in PATH at /usr/bin/ctr
+[INFO]  Creating killall script /usr/local/bin/k3s-killall.sh
+[INFO]  Creating uninstall script /usr/local/bin/k3s-uninstall.sh
+[INFO]  env: Creating environment file /etc/systemd/system/k3s.service.env
+[INFO]  systemd: Creating service file /etc/systemd/system/k3s.service
+[INFO]  systemd: Enabling k3s unit
+Created symlink /etc/systemd/system/multi-user.target.wants/k3s.service → /etc/systemd/system/k3s.service.
+[INFO]  systemd: Starting k3s
+Waiting for k3s to be ready...
+Waiting... (1/30)
+✓ k3s is ready
+✓ k3s installed successfully
+Installing Helm...
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0100 11928  100 11928    0     0   113k      0 --:--:-- --:--:-- --:--:--  114k
+Downloading https://get.helm.sh/helm-v3.19.0-linux-amd64.tar.gz
+Verifying checksum... Done.
+Preparing to install helm into /usr/local/bin
+helm installed into /usr/local/bin/helm
+✓ Helm installed
+error: unknown flag: --short
+See 'kubectl version --help' for usage.
+NAME            STATUS   ROLES                  AGE   VERSION
+ip-10-0-1-237   Ready    control-plane,master   7s    v1.33.5+k3s1
+✓ k3s and kubectl ready
+[0;32m✓ k3s installed successfully[0m
+
+[1;33m[5/9] Copying Kubernetes manifests to EC2 instance...[0m
+[0;32m✓ Kubernetes manifests copied[0m
+
+[1;33m[6/9] Building Docker images on EC2 instance...[0m
+Building Docker images...
+Building api-gateway...
+Building query-service...
+Building validation-service...
+Building queue-service...
+Building processing-service...
+Building storage-service...
+Building external-api-service...
+Building queue-worker-service...
+Building frontend...
+Waiting for all builds to complete...

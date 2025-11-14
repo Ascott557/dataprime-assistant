@@ -1,0 +1,34 @@
+---
+# Ingress for Frontend and API Gateway using k3s Traefik
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: dataprime-ingress
+  namespace: dataprime-demo
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  ingressClassName: traefik
+  rules:
+    - http:
+        paths:
+          # Frontend routes
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 8020
+          # API Gateway routes
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: api-gateway
+                port:
+                  number: 8010
+
+
+

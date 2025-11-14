@@ -1,0 +1,98 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  namespace: dataprime-demo
+  labels:
+    app: api-gateway
+    service: api-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api-gateway
+  template:
+    metadata:
+      labels:
+        app: api-gateway
+        service: api-gateway
+    spec:
+      containers:
+        - name: api-gateway
+          image: dataprime-api-gateway:latest
+          imagePullPolicy: Never  # Use local image built from Dockerfile
+          env:
+            - name: HOST_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: dataprime-secrets
+                  key: OPENAI_API_KEY
+            - name: CX_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: dataprime-secrets
+                  key: CX_TOKEN
+            - name: CX_DOMAIN
+              valueFrom:
+                configMapKeyRef:
+                  name: dataprime-config
+                  key: CX_DOMAIN
+            - name: CX_APPLICATION_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: dataprime-config
+                  key: CX_APPLICATION_NAME
+            - name: CX_SUBSYSTEM_NAME
+              value: "api-gateway"
+            - name: REDIS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: dataprime-config
+                  key: REDIS_URL
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: dataprime-config
+                  key: OTEL_EXPORTER_OTLP_ENDPOINT
+            - name: OTEL_SERVICE_NAME
+              value: "api-gateway"
+            - name: SERVICE_NAME
+              value: "api-gateway"
+            - name: SERVICE_VERSION
+              value: "1.0.0"
+          ports:
+            - containerPort: 8010
+              name: http
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 8010
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 8010
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          volumeMounts:
+            - name: sqlite-data
+              mountPath: /app/data
+      volumes:
+        - name: sqlite-data
+          persistentVolumeClaim:
+            claimName: sqlite-data
+

@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install dependencies
-COPY requirements.txt .
+COPY requirements-minimal.txt requirements.txt
 RUN pip install --user --no-cache-dir --no-warn-script-location \
     -r requirements.txt
 
@@ -26,22 +26,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy installed packages from builder
-COPY --from=builder /root/.local /root/.local
+# Create non-root user first
+RUN useradd -m -u 1000 appuser
+
+# Copy installed packages from builder to appuser's home
+COPY --from=builder --chown=appuser:appuser /root/.local /home/appuser/.local
 
 # Copy application code
-COPY app/ ./app/
-COPY services/api_gateway.py ./services/
+COPY --chown=appuser:appuser app/ ./app/
+COPY --chown=appuser:appuser services/api_gateway.py ./services/
 
-# Create non-root user for security
-RUN useradd -m -u 1000 appuser && \
-    chown -R appuser:appuser /app
+# Create data directory for SQLite database
+RUN mkdir -p /app/data && chown -R appuser:appuser /app/data
 
 # Switch to non-root user
 USER appuser
 
 # Add local packages to PATH
-ENV PATH=/root/.local/bin:$PATH
+ENV PATH=/home/appuser/.local/bin:$PATH
 ENV PYTHONUNBUFFERED=1
 
 # Expose service port

@@ -41,8 +41,8 @@ tracer = trace.get_tracer(__name__)
 
 app = Flask(__name__)
 
-# Database file
-DB_FILE = "distributed_feedback.db"
+# Database file (SQLite persistent storage)
+DB_FILE = "/app/data/distributed_feedback.db"
 
 # Service stats
 storage_stats = {

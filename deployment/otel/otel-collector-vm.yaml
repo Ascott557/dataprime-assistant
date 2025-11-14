@@ -31,6 +31,7 @@ receivers:
             enabled: true
         # Exclude virtual/temporary filesystems to reduce noise
         exclude_fs_types:
+          match_type: strict
           fs_types:
             - overlay
             - tmpfs
@@ -38,6 +39,7 @@ receivers:
             - squashfs
             - iso9660
         exclude_mount_points:
+          match_type: strict
           mount_points:
             - /dev
             - /proc
@@ -68,20 +70,22 @@ receivers:
       
       # Process metrics (CPU, memory per process)
       # NOTE: Can be resource intensive, enable for deep debugging only
-      process:
-        metrics:
-          process.cpu.time:
-            enabled: true
-          process.memory.usage:
-            enabled: true
-        # Monitor key processes
-        include:
-          names:
-            - dockerd
-            - python
-            - nginx
-            - postgres
-            - redis-server
+      # DISABLED for local Docker testing due to permission requirements
+      # process:
+      #   metrics:
+      #     process.cpu.time:
+      #       enabled: true
+      #     process.memory.usage:
+      #       enabled: true
+      #   # Monitor key processes
+      #   include:
+      #     match_type: strict
+      #     names:
+      #       - dockerd
+      #       - python
+      #       - nginx
+      #       - postgres
+      #       - redis-server
   
   # OTLP receiver for application traces and metrics
   otlp:
@@ -163,17 +167,17 @@ exporters:
   prometheus:
     endpoint: "0.0.0.0:8889"
     namespace: dataprime_demo
-    const_labels:
-      environment: ${env:ENVIRONMENT}
-      deployment: vm
   
-  # Logging exporter for troubleshooting (disable in production)
+  # Logging exporter for local debugging (always works without credentials)
   logging:
-    loglevel: info
+    verbosity: basic
     sampling_initial: 5
     sampling_thereafter: 200
 
 service:
+  # Enable extensions for health checks and debugging
+  extensions: [health_check, pprof, zpages]
+  
   # Performance tuning for t3.small
   telemetry:
     logs:
@@ -194,8 +198,8 @@ service:
         - resource
         - batch
       exporters:
+        - logging  # Always enabled for local testing
         - coralogix
-        # - logging  # Uncomment for debugging
     
     # Metrics pipeline (host metrics + custom application metrics)
     metrics:
@@ -208,9 +212,9 @@ service:
         - resource
         - batch
       exporters:
+        - logging  # Always enabled for local testing
         - coralogix
         - prometheus  # Local Prometheus endpoint for debugging
-        # - logging  # Uncomment for debugging
     
     # Logs pipeline (structured application logs)
     logs:
@@ -222,8 +226,8 @@ service:
         - resource
         - batch
       exporters:
+        - logging  # Always enabled for local testing
         - coralogix
-        # - logging  # Uncomment for debugging
 
 # Extensions (optional health check and monitoring)
 extensions:

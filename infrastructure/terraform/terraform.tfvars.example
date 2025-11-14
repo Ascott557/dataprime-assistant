@@ -1,0 +1,58 @@
+# Example Terraform Variables
+# Copy this file to terraform.tfvars and fill in your values
+# terraform.tfvars is gitignored for security
+
+###############################################################################
+# Required Variables (Must be set!)
+###############################################################################
+
+# Your Coralogix Send-Your-Data API key
+# Get it from: Coralogix UI → Settings → Send Your Data → API Key
+coralogix_token = "your-coralogix-token-here"
+
+# Your OpenAI API key (for query generation)
+# Get it from: https://platform.openai.com/api-keys
+openai_api_key = "sk-your-openai-key-here"
+
+# Your current public IP address (for SSH access)
+# Find it: curl https://checkip.amazonaws.com
+# Example: "1.2.3.4/32"
+allowed_ssh_cidr = "YOUR.IP.ADDRESS.HERE/32"
+
+###############################################################################
+# Optional Variables (Can customize or use defaults)
+###############################################################################
+
+# AWS region (default: us-east-1)
+# aws_region = "us-east-1"
+
+# Project name (default: dataprime-demo)
+# project_name = "dataprime-demo"
+
+# Environment (default: production)
+# environment = "production"
+
+# Instance type (default: t3.small)
+# Options: t3.small (2GB RAM) or t3.medium (4GB RAM)
+# instance_type = "t3.small"
+
+# Root volume size in GB (default: 30)
+# root_volume_size = 30
+
+# Coralogix domain (default: coralogix.com)
+# Options: coralogix.com, coralogix.eu, coralogix.in, coralogix.us, coralogixsg.com
+# coralogix_domain = "coralogix.com"
+
+# Coralogix application name (default: dataprime-demo)
+# coralogix_app_name = "dataprime-demo"
+
+# Coralogix subsystem name (default: vm-deployment)
+# coralogix_subsystem = "vm-deployment"
+
+# Your Coralogix company ID (default: 4015437)
+# coralogix_company_id = "4015437"
+
+
+
+
+

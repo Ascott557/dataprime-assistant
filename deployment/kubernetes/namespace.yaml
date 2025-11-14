@@ -1,0 +1,12 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dataprime-demo
+  labels:
+    app: dataprime-demo
+    environment: production
+    managed-by: k3s
+
+
+

@@ -1,0 +1,340 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: dataprime-demo
+  labels:
+    app: otel-collector
+data:
+  otel-collector-config.yaml: |
+    receivers:
+      # Host metrics collection for Coralogix Infrastructure Monitoring
+      hostmetrics:
+        collection_interval: 30s
+        root_path: /hostfs
+        scrapers:
+          cpu:
+            metrics:
+              system.cpu.utilization:
+                enabled: true
+          disk:
+            metrics:
+              system.disk.io:
+                enabled: true
+              system.disk.operations:
+                enabled: true
+          filesystem:
+            metrics:
+              system.filesystem.usage:
+                enabled: true
+              system.filesystem.utilization:
+                enabled: true
+            exclude_fs_types:
+              match_type: strict
+              fs_types:
+                - overlay
+                - tmpfs
+                - devtmpfs
+                - squashfs
+                - iso9660
+            exclude_mount_points:
+              match_type: strict
+              mount_points:
+                - /dev
+                - /proc
+                - /sys
+                - /var/lib/docker/containers
+          load:
+            cpu_average: true
+          memory:
+            metrics:
+              system.memory.usage:
+                enabled: true
+              system.memory.utilization:
+                enabled: true
+          network:
+            metrics:
+              system.network.io:
+                enabled: true
+              system.network.errors:
+                enabled: true
+              system.network.connections:
+                enabled: true
+      
+      # OTLP receiver for application traces and metrics
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+    
+    processors:
+      memory_limiter:
+        limit_mib: 256
+        spike_limit_mib: 64
+        check_interval: 1s
+      
+      batch:
+        send_batch_size: 512
+        timeout: 10s
+        send_batch_max_size: 1024
+      
+      # Kubernetes resource detection
+      resourcedetection:
+        detectors:
+          - env
+          - system
+        timeout: 5s
+        override: true
+      
+      # Add Kubernetes attributes
+      k8sattributes:
+        auth_type: "serviceAccount"
+        passthrough: false
+        extract:
+          metadata:
+            - k8s.namespace.name
+            - k8s.deployment.name
+            - k8s.statefulset.name
+            - k8s.daemonset.name
+            - k8s.pod.name
+            - k8s.pod.uid
+            - k8s.node.name
+            - k8s.container.name
+          labels:
+            - tag_name: app
+              key: app
+              from: pod
+        pod_association:
+          - sources:
+              - from: resource_attribute
+                name: k8s.pod.ip
+          - sources:
+              - from: resource_attribute
+                name: k8s.pod.uid
+          - sources:
+              - from: connection
+      
+      resource:
+        attributes:
+          - key: deployment.environment
+            value: production
+            action: upsert
+          - key: service.namespace
+            value: dataprime-demo
+            action: upsert
+    
+    exporters:
+      coralogix:
+        domain: "${env:CX_DOMAIN}"
+        private_key: "${env:CX_TOKEN}"
+        application_name: "${env:CX_APPLICATION_NAME}"
+        subsystem_name: "k3s-infrastructure"
+        timeout: 30s
+        compression: gzip
+        retry_on_failure:
+          enabled: true
+          initial_interval: 5s
+          max_interval: 30s
+          max_elapsed_time: 300s
+        sending_queue:
+          enabled: true
+          num_consumers: 10
+          queue_size: 1000
+      
+      logging:
+        verbosity: basic
+        sampling_initial: 5
+        sampling_thereafter: 200
+    
+    service:
+      telemetry:
+        logs:
+          level: info
+      pipelines:
+        traces:
+          receivers:
+            - otlp
+          processors:
+            - memory_limiter
+            - k8sattributes
+            - resourcedetection
+            - resource
+            - batch
+          exporters:
+            - coralogix
+        
+        metrics:
+          receivers:
+            - hostmetrics
+            - otlp
+          processors:
+            - memory_limiter
+            - k8sattributes
+            - resourcedetection
+            - resource
+            - batch
+          exporters:
+            - coralogix
+        
+        logs:
+          receivers:
+            - otlp
+          processors:
+            - memory_limiter
+            - k8sattributes
+            - resourcedetection
+            - resource
+            - batch
+          exporters:
+            - coralogix
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  namespace: dataprime-demo
+  labels:
+    app: otel-collector
+spec:
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+      protocol: TCP
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+      protocol: TCP
+  selector:
+    app: otel-collector
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: otel-collector
+  namespace: dataprime-demo
+  labels:
+    app: otel-collector
+spec:
+  selector:
+    matchLabels:
+      app: otel-collector
+  template:
+    metadata:
+      labels:
+        app: otel-collector
+    spec:
+      serviceAccountName: otel-collector
+      containers:
+        - name: otel-collector
+          image: otel/opentelemetry-collector-contrib:0.91.0
+          args:
+            - --config=/etc/otel-collector-config.yaml
+          env:
+            - name: CX_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: dataprime-secrets
+                  key: CX_TOKEN
+            - name: CX_DOMAIN
+              valueFrom:
+                configMapKeyRef:
+                  name: dataprime-config
+                  key: CX_DOMAIN
+            - name: CX_APPLICATION_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: dataprime-config
+                  key: CX_APPLICATION_NAME
+            - name: K8S_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: K8S_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: K8S_POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          ports:
+            - containerPort: 4317
+              name: otlp-grpc
+              protocol: TCP
+            - containerPort: 4318
+              name: otlp-http
+              protocol: TCP
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+          volumeMounts:
+            - name: otel-collector-config
+              mountPath: /etc/otel-collector-config.yaml
+              subPath: otel-collector-config.yaml
+              readOnly: true
+            - name: hostfs
+              mountPath: /hostfs
+              readOnly: true
+      volumes:
+        - name: otel-collector-config
+          configMap:
+            name: otel-collector-config
+        - name: hostfs
+          hostPath:
+            path: /
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: otel-collector
+  namespace: dataprime-demo
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: otel-collector
+rules:
+  - apiGroups: [""]
+    resources:
+      - nodes
+      - nodes/proxy
+      - nodes/metrics
+      - services
+      - endpoints
+      - pods
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources:
+      - replicasets
+      - deployments
+      - daemonsets
+      - statefulsets
+    verbs: ["get", "list", "watch"]
+  - nonResourceURLs:
+      - /metrics
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: otel-collector
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: otel-collector
+subjects:
+  - kind: ServiceAccount
+    name: otel-collector
+    namespace: dataprime-demo
+
+
+

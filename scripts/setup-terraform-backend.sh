@@ -1,115 +1,148 @@
 #!/bin/bash
-# Setup Terraform Backend (S3 + DynamoDB)
-# Run this ONCE before deploying infrastructure
+###############################################################################
+# Terraform Backend Setup Script
+# 
+# This script creates the S3 bucket and DynamoDB table for Terraform state.
+# This is a one-time setup that must be run before deploying the main infrastructure.
+#
+# Usage: ./scripts/setup-terraform-backend.sh
+###############################################################################
 
 set -euo pipefail
 
-echo "========================================="
-echo "🔧 Terraform Backend Setup"
-echo "========================================="
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Script directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+BACKEND_DIR="$PROJECT_ROOT/infrastructure/terraform/backend-setup"
+
+echo -e "${BLUE}=====================================================================${NC}"
+echo -e "${BLUE}DataPrime Demo - Terraform Backend Setup${NC}"
+echo -e "${BLUE}=====================================================================${NC}"
 echo ""
 
-# Check prerequisites
-command -v aws >/dev/null 2>&1 || { echo "❌ AWS CLI not found. Install it first."; exit 1; }
-command -v terraform >/dev/null 2>&1 || { echo "❌ Terraform not found. Install it first."; exit 1; }
+###############################################################################
+# Prerequisites Check
+###############################################################################
+echo -e "${YELLOW}[1/5] Checking prerequisites...${NC}"
 
-# Variables
-PROJECT_NAME="${PROJECT_NAME:-dataprime-demo}"
-AWS_REGION="${AWS_REGION:-us-east-1}"
-BACKEND_DIR="$(dirname "$0")/../infrastructure/terraform/backend-setup"
+# Check if Terraform is installed
+if ! command -v terraform &> /dev/null; then
+  echo -e "${RED}ERROR: Terraform is not installed${NC}"
+  echo "Install it from: https://www.terraform.io/downloads"
+  exit 1
+fi
+echo -e "${GREEN}✓ Terraform installed: $(terraform version | head -n1)${NC}"
 
-# Verify AWS credentials
-echo "🔍 Checking AWS credentials..."
-if ! aws sts get-caller-identity > /dev/null 2>&1; then
-    echo "❌ AWS credentials not configured"
-    echo "Run: aws configure"
-    exit 1
+# Check if AWS CLI is installed
+if ! command -v aws &> /dev/null; then
+  echo -e "${RED}ERROR: AWS CLI is not installed${NC}"
+  echo "Install it from: https://aws.amazon.com/cli/"
+  exit 1
+fi
+echo -e "${GREEN}✓ AWS CLI installed: $(aws --version | cut -d' ' -f1)${NC}"
+
+# Check AWS credentials
+if ! aws sts get-caller-identity &> /dev/null; then
+  echo -e "${RED}ERROR: AWS credentials not configured${NC}"
+  echo "Run: aws configure"
+  exit 1
 fi
 
-AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-echo "✅ AWS Account: $AWS_ACCOUNT_ID"
-echo "✅ AWS Region: $AWS_REGION"
-echo ""
+AWS_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+AWS_USER=$(aws sts get-caller-identity --query Arn --output text)
+echo -e "${GREEN}✓ AWS credentials valid${NC}"
+echo -e "  Account: ${AWS_ACCOUNT}"
+echo -e "  User: ${AWS_USER}"
 
-# Confirm before proceeding
-read -p "Create Terraform backend resources in $AWS_REGION? (y/N): " -n 1 -r
-echo
-if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo "Aborted."
-    exit 0
+###############################################################################
+# Navigate to Backend Directory
+###############################################################################
+echo ""
+echo -e "${YELLOW}[2/5] Navigating to backend setup directory...${NC}"
+
+if [ ! -d "$BACKEND_DIR" ]; then
+  echo -e "${RED}ERROR: Backend directory not found: $BACKEND_DIR${NC}"
+  exit 1
 fi
 
-# Initialize and apply backend setup
-echo ""
-echo "📦 Initializing Terraform for backend setup..."
 cd "$BACKEND_DIR"
+echo -e "${GREEN}✓ In directory: $(pwd)${NC}"
 
-terraform init || { echo "❌ Terraform init failed"; exit 1; }
+###############################################################################
+# Initialize Terraform
+###############################################################################
+echo ""
+echo -e "${YELLOW}[3/5] Initializing Terraform...${NC}"
+
+terraform init
+echo -e "${GREEN}✓ Terraform initialized${NC}"
+
+###############################################################################
+# Plan and Apply
+###############################################################################
+echo ""
+echo -e "${YELLOW}[4/5] Creating backend resources...${NC}"
+echo -e "${BLUE}This will create:${NC}"
+echo -e "  • S3 bucket for Terraform state"
+echo -e "  • DynamoDB table for state locking"
+echo ""
+
+# Run terraform plan
+terraform plan -out=tfplan
 
 echo ""
-echo "📋 Planning backend resources..."
-terraform plan \
-    -var="aws_region=$AWS_REGION" \
-    -var="project_name=$PROJECT_NAME" \
-    -out=tfplan
+read -p "Apply this plan? (yes/no): " CONFIRM
 
-echo ""
-echo "🚀 Creating backend resources..."
+if [ "$CONFIRM" != "yes" ]; then
+  echo -e "${RED}Aborted by user${NC}"
+  exit 1
+fi
+
+# Apply the plan
 terraform apply tfplan
+rm tfplan
 
-# Get outputs
+echo -e "${GREEN}✓ Backend resources created${NC}"
+
+###############################################################################
+# Save Outputs
+###############################################################################
 echo ""
-echo "========================================="
-echo "✅ Backend Setup Complete!"
-echo "========================================="
-echo ""
+echo -e "${YELLOW}[5/5] Saving outputs...${NC}"
 
 S3_BUCKET=$(terraform output -raw s3_bucket_name)
 DYNAMODB_TABLE=$(terraform output -raw dynamodb_table_name)
 
-echo "📝 Backend Configuration:"
 echo ""
-echo "Add this to infrastructure/terraform/backend.tf:"
+echo -e "${GREEN}=====================================================================${NC}"
+echo -e "${GREEN}✅ Backend Setup Complete!${NC}"
+echo -e "${GREEN}=====================================================================${NC}"
 echo ""
-echo "terraform {"
-echo "  backend \"s3\" {"
-echo "    bucket         = \"$S3_BUCKET\""
-echo "    key            = \"dataprime-assistant/terraform.tfstate\""
-echo "    region         = \"$AWS_REGION\""
-echo "    dynamodb_table = \"$DYNAMODB_TABLE\""
-echo "    encrypt        = true"
-echo "  }"
-echo "}"
+echo -e "${BLUE}S3 Bucket:${NC}       $S3_BUCKET"
+echo -e "${BLUE}DynamoDB Table:${NC}  $DYNAMODB_TABLE"
 echo ""
-
-# Create backend.tf file
-MAIN_TF_DIR="$(dirname "$0")/../infrastructure/terraform"
-BACKEND_FILE="$MAIN_TF_DIR/backend.tf"
-
-cat > "$BACKEND_FILE" <<EOF
-# Terraform Backend Configuration
-# Auto-generated by setup-terraform-backend.sh
-
-terraform {
-  backend "s3" {
-    bucket         = "$S3_BUCKET"
-    key            = "dataprime-assistant/terraform.tfstate"
-    region         = "$AWS_REGION"
-    dynamodb_table = "$DYNAMODB_TABLE"
-    encrypt        = true
-  }
-}
-EOF
-
-echo "✅ Created: $BACKEND_FILE"
+echo -e "${YELLOW}Next Steps:${NC}"
 echo ""
-echo "📋 Next Steps:"
-echo "1. cd infrastructure/terraform"
-echo "2. terraform init  # Will migrate to S3 backend"
-echo "3. terraform plan -var-file=environments/dev.tfvars"
-echo "4. terraform apply -var-file=environments/dev.tfvars"
+echo -e "1. Update ${BLUE}infrastructure/terraform/main.tf${NC} with backend config:"
 echo ""
-echo "Or use the deployment script:"
-echo "   ./scripts/deploy-vm.sh"
+echo -e "   ${BLUE}terraform {${NC}"
+echo -e "     ${BLUE}backend \"s3\" {${NC}"
+echo -e "       ${BLUE}bucket         = \"$S3_BUCKET\"${NC}"
+echo -e "       ${BLUE}key            = \"dataprime-demo/terraform.tfstate\"${NC}"
+echo -e "       ${BLUE}region         = \"$(terraform output -raw s3_bucket_arn | cut -d':' -f4)\"${NC}"
+echo -e "       ${BLUE}dynamodb_table = \"$DYNAMODB_TABLE\"${NC}"
+echo -e "       ${BLUE}encrypt        = true${NC}"
+echo -e "     ${BLUE}}${NC}"
+echo -e "   ${BLUE}}${NC}"
 echo ""
-
+echo -e "2. Deploy main infrastructure:"
+echo -e "   ${GREEN}./scripts/deploy-aws.sh${NC}"
+echo ""
+echo -e "${GREEN}=====================================================================${NC}"

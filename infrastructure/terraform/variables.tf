@@ -1,51 +1,64 @@
-# DataPrime Assistant - Terraform Variables
+###############################################################################
+# Required Variables
+###############################################################################
 
+variable "coralogix_token" {
+  description = "Coralogix Send-Your-Data API key"
+  type        = string
+  sensitive   = true
+}
+
+variable "openai_api_key" {
+  description = "OpenAI API key for query generation"
+  type        = string
+  sensitive   = true
+}
+
+variable "allowed_ssh_cidr" {
+  description = "CIDR block allowed to SSH (your IP/32)"
+  type        = string
+  
+  validation {
+    condition     = can(regex("^([0-9]{1,3}\\.){3}[0-9]{1,3}/[0-9]{1,2}$", var.allowed_ssh_cidr))
+    error_message = "Must be a valid CIDR block (e.g., 1.2.3.4/32)"
+  }
+}
+
+###############################################################################
 # AWS Configuration
+###############################################################################
+
 variable "aws_region" {
-  description = "AWS region for deployment"
+  description = "AWS region for resources"
   type        = string
   default     = "us-east-1"
 }
 
 variable "project_name" {
-  description = "Project name used for resource naming"
+  description = "Project name for resource naming"
   type        = string
   default     = "dataprime-demo"
 }
 
 variable "environment" {
-  description = "Environment name (dev, staging, prod)"
+  description = "Environment name (dev, staging, production)"
   type        = string
-  default     = "dev"
-  
-  validation {
-    condition     = contains(["dev", "staging", "prod"], var.environment)
-    error_message = "Environment must be dev, staging, or prod."
-  }
+  default     = "production"
 }
 
-# Network Configuration
-variable "vpc_cidr" {
-  description = "CIDR block for VPC"
-  type        = string
-  default     = "10.0.0.0/16"
-}
+###############################################################################
+# Instance Configuration
+###############################################################################
 
-variable "allowed_ssh_cidr" {
-  description = "CIDR block allowed to SSH (your IP address/32)"
-  type        = string
-  
-  validation {
-    condition     = can(cidrhost(var.allowed_ssh_cidr, 0))
-    error_message = "Must be a valid CIDR block (e.g., 1.2.3.4/32)."
-  }
-}
-
-# EC2 Configuration
 variable "instance_type" {
-  description = "EC2 instance type (t3.small for cost optimization)"
+  description = "EC2 instance type"
   type        = string
   default     = "t3.small"
+  
+  validation {
+    condition     = can(regex("^t3\\.(small|medium)$", var.instance_type))
+    error_message = "For cost optimization, only t3.small or t3.medium allowed"
+  }
 }
 
 variable "root_volume_size" {
@@ -54,74 +67,79 @@ variable "root_volume_size" {
   default     = 30
   
   validation {
-    condition     = var.root_volume_size >= 20 && var.root_volume_size <= 100
-    error_message = "Root volume size must be between 20 and 100 GB."
+    condition     = var.root_volume_size >= 20 && var.root_volume_size <= 200
+    error_message = "Volume size must be between 20 and 200 GB"
   }
 }
 
-# Coralogix Configuration
-variable "coralogix_token" {
-  description = "Coralogix Send Data API Key"
+###############################################################################
+# Network Configuration
+###############################################################################
+
+variable "vpc_cidr" {
+  description = "CIDR block for VPC"
   type        = string
-  sensitive   = true
-  
-  validation {
-    condition     = length(var.coralogix_token) > 0
-    error_message = "Coralogix token cannot be empty."
-  }
+  default     = "10.0.0.0/16"
 }
+
+variable "public_subnet_cidr" {
+  description = "CIDR block for public subnet"
+  type        = string
+  default     = "10.0.1.0/24"
+}
+
+###############################################################################
+# Coralogix Configuration
+###############################################################################
 
 variable "coralogix_domain" {
-  description = "Coralogix domain (e.g., coralogix.com)"
+  description = "Coralogix domain or ingress endpoint (e.g., coralogix.com, ingress.eu2.coralogix.com:443)"
   type        = string
   default     = "coralogix.com"
 }
 
-variable "coralogix_application_name" {
+variable "coralogix_app_name" {
   description = "Coralogix application name"
   type        = string
   default     = "dataprime-demo"
 }
 
+variable "coralogix_subsystem" {
+  description = "Coralogix subsystem name"
+  type        = string
+  default     = "vm-deployment"
+}
+
 variable "coralogix_company_id" {
-  description = "Coralogix Company ID for Infrastructure Explorer integration"
+  description = "Coralogix company ID for IAM role trust"
   type        = string
   default     = "4015437"
 }
 
+variable "coralogix_aws_account_id" {
+  description = "Coralogix AWS account ID for cross-account access"
+  type        = string
+  default     = "625240141681" # Coralogix production AWS account
+}
+
+###############################################################################
 # Application Configuration
-variable "openai_api_key" {
-  description = "OpenAI API Key for DataPrime query generation"
+###############################################################################
+
+variable "redis_url" {
+  description = "Redis connection URL (containerized)"
   type        = string
-  sensitive   = true
-  
-  validation {
-    condition     = length(var.openai_api_key) > 0
-    error_message = "OpenAI API key cannot be empty."
-  }
+  default     = "redis://redis:6379/0"
 }
 
-variable "postgres_password" {
-  description = "PostgreSQL database password"
+variable "otel_endpoint" {
+  description = "OpenTelemetry collector endpoint (containerized)"
   type        = string
-  sensitive   = true
-  
-  validation {
-    condition     = length(var.postgres_password) >= 12
-    error_message = "PostgreSQL password must be at least 12 characters long."
-  }
+  default     = "http://otel-collector:4317"
 }
 
-# Optional: Advanced Configuration
-variable "enable_detailed_monitoring" {
-  description = "Enable detailed CloudWatch monitoring (additional cost)"
-  type        = bool
-  default     = false
+variable "repository_url" {
+  description = "Git repository URL for application code"
+  type        = string
+  default     = "https://github.com/coralogix/dataprime-assistant.git"
 }
-
-variable "create_elastic_ip" {
-  description = "Create Elastic IP for stable public address"
-  type        = bool
-  default     = true
-}
-

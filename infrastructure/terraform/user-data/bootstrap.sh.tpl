@@ -1,316 +1,296 @@
 #!/bin/bash
-# DataPrime Assistant - EC2 Bootstrap Script
-# This script runs on first boot to set up the application
+###############################################################################
+# DataPrime Demo - EC2 Bootstrap Script
+# 
+# This script:
+# 1. Updates system and installs dependencies
+# 2. Installs Docker and Docker Compose
+# 3. Clones application code
+# 4. Creates environment configuration
+# 5. Starts all services via Docker Compose
+# 6. Configures systemd service for auto-restart
+# 7. Sets up firewall rules
+# 8. Configures health check monitoring
+#
+# All output is logged to /var/log/dataprime-bootstrap.log
+###############################################################################
 
 set -euo pipefail
 
 # Logging setup
-exec > >(tee /var/log/dataprime-bootstrap.log)
-exec 2>&1
+LOGFILE="/var/log/dataprime-bootstrap.log"
+exec > >(tee -a "$LOGFILE") 2>&1
 
-echo "========================================="
-echo "🚀 DataPrime Assistant Bootstrap Starting"
-echo "========================================="
-echo "Timestamp: $(date)"
-echo ""
+echo "======================================================================"
+echo "DataPrime Demo Bootstrap - Started at $(date)"
+echo "======================================================================"
 
-# Error handling function
-error_exit() {
-    echo "❌ ERROR: $1" >&2
-    exit 1
-}
+# Environment variables from Terraform
+export CX_TOKEN="${coralogix_token}"
+export CX_DOMAIN="${coralogix_domain}"
+export CX_APPLICATION_NAME="${coralogix_app_name}"
+export CX_SUBSYSTEM_NAME="${coralogix_subsystem}"
+export OPENAI_API_KEY="${openai_api_key}"
+export REDIS_URL="${redis_url}"
+export OTEL_EXPORTER_OTLP_ENDPOINT="${otel_endpoint}"
+export PROJECT_NAME="${project_name}"
+export ENVIRONMENT="${environment}"
 
-# Success logging
-log_success() {
-    echo "✅ $1"
-}
+# Application directory
+APP_DIR="/opt/dataprime-assistant"
 
-# Update system
-echo "📦 Updating system packages..."
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq || error_exit "Failed to update package list"
-apt-get upgrade -y -qq || error_exit "Failed to upgrade packages"
-log_success "System updated"
+###############################################################################
+# 1. System Update and Dependencies
+###############################################################################
+echo "[1/9] Updating system packages..."
+apt-get update -y
+DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold"
 
-# Install essential packages
-echo "📦 Installing essential packages..."
-apt-get install -y -qq \
-    curl \
-    wget \
-    git \
-    jq \
-    htop \
-    net-tools \
-    ca-certificates \
-    gnupg \
-    lsb-release \
-    unzip \
-    openssl || error_exit "Failed to install essential packages"
-log_success "Essential packages installed"
+echo "[1/9] Installing essential packages..."
+apt-get install -y \
+  curl \
+  wget \
+  git \
+  unzip \
+  jq \
+  ca-certificates \
+  gnupg \
+  lsb-release \
+  apt-transport-https \
+  software-properties-common
+
+###############################################################################
+# 2. Install Docker and Docker Compose
+###############################################################################
+echo "[2/9] Installing Docker..."
+
+# Add Docker's official GPG key
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+chmod a+r /etc/apt/keyrings/docker.gpg
+
+# Add Docker repository
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+  $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
 
 # Install Docker
-echo "🐳 Installing Docker..."
-if ! command -v docker &> /dev/null; then
-    curl -fsSL https://get.docker.com -o get-docker.sh || error_exit "Failed to download Docker installer"
-    sh get-docker.sh || error_exit "Failed to install Docker"
-    rm get-docker.sh
-    
-    # Add ubuntu user to docker group
-    usermod -aG docker ubuntu
-    
-    # Start and enable Docker
-    systemctl start docker
-    systemctl enable docker
-    
-    log_success "Docker installed and started"
-else
-    log_success "Docker already installed"
-fi
+apt-get update -y
+apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
-# Install Docker Compose V2
-echo "🐳 Installing Docker Compose..."
-apt-get install -y -qq docker-compose-plugin || error_exit "Failed to install Docker Compose"
-log_success "Docker Compose installed"
+# Start and enable Docker
+systemctl start docker
+systemctl enable docker
 
 # Verify Docker installation
-docker --version || error_exit "Docker verification failed"
-docker compose version || error_exit "Docker Compose verification failed"
+docker --version
+docker compose version
 
-# Clone/Setup application code
-echo "📁 Setting up application..."
-APP_DIR="/opt/dataprime-assistant"
-if [ -d "$APP_DIR" ]; then
-    echo "⚠️  Application directory already exists, backing up..."
-    mv "$APP_DIR" "$APP_DIR.backup.$(date +%s)"
-fi
+echo "[2/9] Docker installed successfully!"
 
+###############################################################################
+# 3. Clone Application Code
+###############################################################################
+echo "[3/9] Setting up application code..."
+
+# Create application directory
 mkdir -p "$APP_DIR"
 cd "$APP_DIR"
 
-# Clone from GitHub (adjust URL if using private repo)
-echo "📥 Cloning application repository..."
-# For now, we'll copy the files during deployment
-# In production, you'd clone from git:
-# git clone https://github.com/your-org/dataprime-assistant.git .
+# Clone repository (or use pre-uploaded code)
+if [ ! -d "$APP_DIR/coralogix-dataprime-demo" ]; then
+  echo "Cloning repository from ${repository_url}..."
+  git clone "${repository_url}" .
+else
+  echo "Application code already exists, updating..."
+  git pull
+fi
 
-# For demo, we'll create the necessary structure
-mkdir -p deployment/docker deployment/otel
-mkdir -p coralogix-dataprime-demo/{app,services}
+###############################################################################
+# 4. Create Environment Configuration
+###############################################################################
+echo "[4/9] Creating environment configuration..."
 
-# Create environment file
-echo "🔧 Creating environment configuration..."
-cat > deployment/docker/.env.vm <<'EOF'
+cat > "$APP_DIR/deployment/docker/.env.vm" <<EOF
 # Coralogix Configuration
-CX_TOKEN=${coralogix_token}
-CX_DOMAIN=coralogix.com
-CX_APPLICATION_NAME=${coralogix_app_name}
-CX_SUBSYSTEM_NAME=vm-deployment
+CX_TOKEN=$${CX_TOKEN}
+CX_DOMAIN=$${CX_DOMAIN}
+CX_APPLICATION_NAME=$${CX_APPLICATION_NAME}
+CX_SUBSYSTEM_NAME=$${CX_SUBSYSTEM_NAME}
 
 # OpenAI Configuration
-OPENAI_API_KEY=${openai_api_key}
-
-# Database Configuration
-POSTGRES_USER=dataprime
-POSTGRES_PASSWORD=${postgres_password}
-POSTGRES_DB=dataprime_demo
-DATABASE_URL=postgresql://dataprime:${postgres_password}@postgres:5432/dataprime_demo
+OPENAI_API_KEY=$${OPENAI_API_KEY}
 
 # Redis Configuration
-REDIS_URL=redis://redis:6379/0
+REDIS_URL=$${REDIS_URL}
 
 # OpenTelemetry Configuration
-OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
-OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+OTEL_EXPORTER_OTLP_ENDPOINT=$${OTEL_EXPORTER_OTLP_ENDPOINT}
 
-# Deployment Configuration
-ENVIRONMENT=${environment}
+# Environment
+ENVIRONMENT=$${ENVIRONMENT}
+PROJECT_NAME=$${PROJECT_NAME}
 EOF
 
-chmod 600 deployment/docker/.env.vm
-log_success "Environment configuration created"
+chmod 600 "$APP_DIR/deployment/docker/.env.vm"
 
-# Generate SSL certificates
-echo "🔒 Generating SSL certificates..."
-mkdir -p deployment/docker/nginx/ssl
-cd deployment/docker/nginx/ssl
+echo "[4/9] Environment configuration created!"
+
+###############################################################################
+# 5. Generate SSL Certificates
+###############################################################################
+echo "[5/9] Generating self-signed SSL certificates..."
+
+mkdir -p "$APP_DIR/deployment/docker/nginx/ssl"
 
 openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-    -keyout dataprime.key \
-    -out dataprime.crt \
-    -subj "/C=US/ST=State/L=City/O=Coralogix/OU=Demo/CN=${project_name}" \
-    -addext "subjectAltName=DNS:${project_name},DNS:localhost,IP:127.0.0.1" \
-    2>/dev/null || error_exit "Failed to generate SSL certificates"
+  -keyout "$APP_DIR/deployment/docker/nginx/ssl/dataprime.key" \
+  -out "$APP_DIR/deployment/docker/nginx/ssl/dataprime.crt" \
+  -subj "/C=US/ST=State/L=City/O=Coralogix/CN=dataprime-demo" \
+  2>&1
 
-chmod 600 dataprime.key
-chmod 644 dataprime.crt
+chmod 600 "$APP_DIR/deployment/docker/nginx/ssl/dataprime.key"
+chmod 644 "$APP_DIR/deployment/docker/nginx/ssl/dataprime.crt"
 
-cd "$APP_DIR"
-log_success "SSL certificates generated"
+echo "[5/9] SSL certificates generated!"
 
-# Note: In a real deployment, you would now have all your application files
-# from the Git clone. For this demo, they need to be included in the AMI
-# or deployed via another mechanism (S3, CodeDeploy, etc.)
+###############################################################################
+# 6. Start Docker Compose Services
+###############################################################################
+echo "[6/9] Starting Docker Compose services..."
 
-# Configure UFW firewall
-echo "🔥 Configuring firewall..."
-ufw --force enable
-ufw default deny incoming
-ufw default allow outgoing
-ufw allow 22/tcp    # SSH
-ufw allow 80/tcp    # HTTP
-ufw allow 443/tcp   # HTTPS
-ufw allow 8010/tcp  # API Gateway (optional, for testing)
-ufw status
-log_success "Firewall configured"
-
-# Start Docker Compose services
-echo "🚀 Starting application services..."
 cd "$APP_DIR/deployment/docker"
 
-# Pull images first to avoid timeouts
-docker compose -f docker-compose.vm.yml pull || echo "⚠️  Some images need to be built locally"
+# Pull images first
+docker compose --env-file .env.vm -f docker-compose.vm.yml pull
+
+# Build custom images
+docker compose --env-file .env.vm -f docker-compose.vm.yml build --no-cache
 
 # Start services
-docker compose -f docker-compose.vm.yml up -d || error_exit "Failed to start Docker services"
+docker compose --env-file .env.vm -f docker-compose.vm.yml up -d
 
-log_success "Application services started"
+echo "[6/9] Waiting for services to initialize (60 seconds)..."
+sleep 60
 
-# Wait for services to be healthy
-echo "⏳ Waiting for services to be ready..."
-sleep 30
+# Check service status
+docker compose --env-file .env.vm -f docker-compose.vm.yml ps
 
-# Health check
-echo "🔍 Performing health checks..."
-HEALTH_CHECK_PASSED=0
+echo "[6/9] Docker Compose services started!"
 
-for i in {1..10}; do
-    if curl -f http://localhost:8010/api/health > /dev/null 2>&1; then
-        log_success "API Gateway is healthy"
-        HEALTH_CHECK_PASSED=1
-        break
-    fi
-    echo "   Attempt $i/10 failed, waiting..."
-    sleep 10
-done
+###############################################################################
+# 7. Configure Systemd Service for Auto-Restart
+###############################################################################
+echo "[7/9] Configuring systemd service..."
 
-if [ $HEALTH_CHECK_PASSED -eq 0 ]; then
-    echo "⚠️  Health check did not pass, but continuing..."
-    echo "   Check logs: docker compose -f $APP_DIR/deployment/docker/docker-compose.vm.yml logs"
-fi
+cat > /etc/systemd/system/dataprime-demo.service <<EOF
+[Unit]
+Description=DataPrime Demo Application
+Requires=docker.service
+After=docker.service
 
-# Setup log rotation
-echo "📝 Configuring log rotation..."
-cat > /etc/logrotate.d/dataprime <<'LOGROTATE'
-/var/log/dataprime-bootstrap.log {
-    daily
-    rotate 7
-    compress
-    delaycompress
-    missingok
-    notifempty
-}
-LOGROTATE
-log_success "Log rotation configured"
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=$APP_DIR/deployment/docker
+ExecStart=/usr/bin/docker compose --env-file .env.vm -f docker-compose.vm.yml up -d
+ExecStop=/usr/bin/docker compose --env-file .env.vm -f docker-compose.vm.yml down
+ExecReload=/usr/bin/docker compose --env-file .env.vm -f docker-compose.vm.yml restart
 
-# Create health check cron job
-echo "⏰ Setting up health check cron job..."
-cat > /usr/local/bin/dataprime-health-check.sh <<'HEALTHCHECK'
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Reload systemd and enable service
+systemctl daemon-reload
+systemctl enable dataprime-demo.service
+
+echo "[7/9] Systemd service configured!"
+
+###############################################################################
+# 8. Configure Firewall (UFW)
+###############################################################################
+echo "[8/9] Configuring firewall..."
+
+# Install UFW if not already installed
+apt-get install -y ufw
+
+# Configure UFW rules
+ufw --force reset
+ufw default deny incoming
+ufw default allow outgoing
+
+# Allow SSH, HTTP, HTTPS
+ufw allow 22/tcp comment 'SSH'
+ufw allow 80/tcp comment 'HTTP'
+ufw allow 443/tcp comment 'HTTPS'
+ufw allow 8010/tcp comment 'API Gateway'
+
+# Enable UFW
+ufw --force enable
+
+echo "[8/9] Firewall configured!"
+
+###############################################################################
+# 9. Set Up Health Check Monitoring
+###############################################################################
+echo "[9/9] Setting up health check monitoring..."
+
+cat > /usr/local/bin/dataprime-health-check.sh <<'EOF'
 #!/bin/bash
-# Health check script for DataPrime Assistant
+# Health check script for DataPrime Demo
 
-cd /opt/dataprime-assistant/deployment/docker
+LOGFILE="/var/log/dataprime-health-check.log"
+APP_DIR="/opt/dataprime-assistant"
+
+echo "=== Health Check - $(date) ===" >> "$LOGFILE"
+
+cd "$APP_DIR/deployment/docker"
 
 # Check if all containers are running
-if ! docker compose -f docker-compose.vm.yml ps | grep -q "Up"; then
-    echo "$(date): Some containers are down, restarting..." >> /var/log/dataprime-health.log
-    docker compose -f docker-compose.vm.yml up -d
-fi
+UNHEALTHY=$(docker compose --env-file .env.vm -f docker-compose.vm.yml ps | grep -v "Up" | grep -v "NAME" | wc -l)
 
-# Check API Gateway health
-if ! curl -f http://localhost:8010/api/health > /dev/null 2>&1; then
-    echo "$(date): API Gateway unhealthy, restarting services..." >> /var/log/dataprime-health.log
-    docker compose -f docker-compose.vm.yml restart api-gateway
+if [ "$UNHEALTHY" -gt 0 ]; then
+  echo "WARNING: $UNHEALTHY unhealthy containers detected!" >> "$LOGFILE"
+  docker compose --env-file .env.vm -f docker-compose.vm.yml ps >> "$LOGFILE"
+  
+  # Attempt restart
+  echo "Attempting to restart services..." >> "$LOGFILE"
+  docker compose --env-file .env.vm -f docker-compose.vm.yml restart
+else
+  echo "All containers healthy" >> "$LOGFILE"
 fi
-HEALTHCHECK
+EOF
 
 chmod +x /usr/local/bin/dataprime-health-check.sh
 
-# Add to crontab (run every 5 minutes)
-(crontab -l 2>/dev/null; echo "*/5 * * * * /usr/local/bin/dataprime-health-check.sh") | crontab -
-log_success "Health check cron job configured"
+# Add cron job (every 5 minutes)
+cat > /etc/cron.d/dataprime-health-check <<EOF
+*/5 * * * * root /usr/local/bin/dataprime-health-check.sh
+EOF
 
-# Create README for operators
-cat > /opt/dataprime-assistant/README-DEPLOYMENT.md <<'README'
-# DataPrime Assistant - Deployment Information
+echo "[9/9] Health check monitoring configured!"
 
-## Application Location
-- Application Directory: /opt/dataprime-assistant
-- Docker Compose File: /opt/dataprime-assistant/deployment/docker/docker-compose.vm.yml
-- Environment Config: /opt/dataprime-assistant/deployment/docker/.env.vm
-
-## Useful Commands
-
-### Check Service Status
-```bash
-cd /opt/dataprime-assistant/deployment/docker
-docker compose -f docker-compose.vm.yml ps
-```
-
-### View Logs
-```bash
-docker compose -f docker-compose.vm.yml logs -f
-docker compose -f docker-compose.vm.yml logs -f api-gateway
-```
-
-### Restart Services
-```bash
-docker compose -f docker-compose.vm.yml restart
-docker compose -f docker-compose.vm.yml restart api-gateway
-```
-
-### Stop/Start All Services
-```bash
-docker compose -f docker-compose.vm.yml stop
-docker compose -f docker-compose.vm.yml start
-```
-
-### Health Checks
-```bash
-curl http://localhost:8010/api/health
-curl http://localhost:13133  # OTel Collector health
-```
-
-## Logs
-- Bootstrap Log: /var/log/dataprime-bootstrap.log
-- Health Check Log: /var/log/dataprime-health.log
-- Docker Logs: Use docker compose logs command above
-
-## Troubleshooting
-1. Check if Docker is running: `systemctl status docker`
-2. Check container status: `docker ps -a`
-3. Check logs: `docker compose logs`
-4. Restart services: `docker compose restart`
-5. Check firewall: `ufw status`
-README
-
-log_success "Operator README created"
-
-# Final output
+###############################################################################
+# Finalization
+###############################################################################
+echo "======================================================================"
+echo "Bootstrap Complete!"
+echo "======================================================================"
+echo "Timestamp: $(date)"
+echo "Application Directory: $APP_DIR"
+echo "Log File: $LOGFILE"
 echo ""
-echo "========================================="
-echo "✅ Bootstrap Complete!"
-echo "========================================="
-echo "Application: http://$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)"
-echo "API Gateway: http://$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4):8010/api/health"
+echo "Services Status:"
+docker compose --env-file "$APP_DIR/deployment/docker/.env.vm" -f "$APP_DIR/deployment/docker/docker-compose.vm.yml" ps
 echo ""
-echo "📁 Application Directory: /opt/dataprime-assistant"
-echo "📋 Logs: /var/log/dataprime-bootstrap.log"
-echo "📖 README: /opt/dataprime-assistant/README-DEPLOYMENT.md"
+echo "Access your application at:"
+echo "  https://$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)"
+echo "  or http://$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4):8010 (API)"
 echo ""
-echo "🔍 Check status:"
-echo "   cd /opt/dataprime-assistant/deployment/docker"
-echo "   docker compose -f docker-compose.vm.yml ps"
-echo ""
-echo "🎉 DataPrime Assistant is ready!"
-echo "========================================="
+echo "To check logs:"
+echo "  tail -f $LOGFILE"
+echo "  cd $APP_DIR/deployment/docker && docker compose --env-file .env.vm -f docker-compose.vm.yml logs -f"
+echo "======================================================================"
 
+exit 0
