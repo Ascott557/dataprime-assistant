@@ -1,0 +1,117 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: product-service
+  namespace: dataprime-demo
+  labels:
+    app: product-service
+    service: product-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: product-service
+  template:
+    metadata:
+      labels:
+        app: product-service
+        service: product-service
+    spec:
+      containers:
+        - name: product-service
+          image: dataprime-product-service:latest
+          imagePullPolicy: Never
+          command: ["python", "services/product_service.py"]
+          env:
+            - name: HOST_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: CX_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: dataprime-secrets
+                  key: CX_TOKEN
+            - name: CX_DOMAIN
+              valueFrom:
+                configMapKeyRef:
+                  name: dataprime-config
+                  key: CX_DOMAIN
+            - name: CX_APPLICATION_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: dataprime-config
+                  key: CX_APPLICATION_NAME
+            - name: CX_SUBSYSTEM_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: dataprime-config
+                  key: CX_SUBSYSTEM_NAME
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: dataprime-config
+                  key: OTEL_EXPORTER_OTLP_ENDPOINT
+            - name: OTEL_SERVICE_NAME
+              value: "product-service"
+            - name: SERVICE_NAME
+              value: "product-service"
+            - name: SERVICE_VERSION
+              value: "1.0.0"
+            - name: OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT
+              value: "true"
+            - name: DB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: dataprime-config
+                  key: DB_HOST
+            - name: DB_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: dataprime-config
+                  key: DB_PORT
+            - name: DB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: dataprime-config
+                  key: DB_NAME
+            - name: DB_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: dataprime-config
+                  key: DB_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: dataprime-secrets
+                  key: DB_PASSWORD
+            - name: DB_MAX_CONNECTIONS
+              valueFrom:
+                configMapKeyRef:
+                  name: dataprime-config
+                  key: DB_MAX_CONNECTIONS
+          ports:
+            - containerPort: 8014
+              name: http
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8014
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8014
+            initialDelaySeconds: 20
+            periodSeconds: 10
+
+

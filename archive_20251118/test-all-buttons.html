@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Complete Frontend Button Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f4f4f4;
+        }
+        .container {
+            max-width: 1000px;
+            margin: auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 { color: #2c3e50; }
+        h2 { color: #34495e; margin-top: 30px; }
+        button {
+            background: #3498db;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 5px;
+        }
+        button:hover { background: #2980b9; }
+        button.danger { background: #e74c3c; }
+        button.danger:hover { background: #c0392b; }
+        button.success { background: #27ae60; }
+        button.success:hover { background: #229954; }
+        .result {
+            margin: 15px 0;
+            padding: 15px;
+            border-radius: 5px;
+            background: #ecf0f1;
+            border-left: 4px solid #3498db;
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .result.success { border-left-color: #27ae60; background: #d5f4e6; }
+        .result.error { border-left-color: #e74c3c; background: #fadbd8; }
+        .status { display: inline-block; padding: 3px 8px; border-radius: 3px; margin-left: 10px; font-weight: bold; }
+        .status.ok { background: #27ae60; color: white; }
+        .status.fail { background: #e74c3c; color: white; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 Complete Frontend Button Test</h1>
+        <p><strong>API Gateway:</strong> <span id="apiUrl">https://54.235.171.176:30444</span></p>
+        <p><strong>Test Status:</strong> <span id="overallStatus">Ready</span></p>
+
+        <h2>1️⃣ Core Application Functionality</h2>
+        <button onclick="testProducts()" class="success">Test Products API</button>
+        <button onclick="testRecommendations()" class="success">Test Recommendations API</button>
+        <div id="result-core" class="result" style="display:none;"></div>
+
+        <h2>2️⃣ Demo Scenarios</h2>
+        <button onclick="testScene9()" class="danger">Test Scene 9 (Database APM)</button>
+        <button onclick="testSlowDatabase()" class="danger">Test Slow Database</button>
+        <button onclick="testPoolExhaustion()" class="danger">Test Pool Exhaustion</button>
+        <div id="result-demo" class="result" style="display:none;"></div>
+
+        <h2>3️⃣ Health Checks</h2>
+        <button onclick="testHealth()">Test API Gateway Health</button>
+        <button onclick="testAllEndpoints()" class="success">🔥 Test ALL Endpoints</button>
+        <div id="result-health" class="result" style="display:none;"></div>
+
+        <h2>📊 Test Results Summary</h2>
+        <div id="summary" class="result">
+            Click "Test ALL Endpoints" to run complete diagnostic.
+        </div>
+    </div>
+
+    <script>
+        const API_GATEWAY_URL = 'https://54.235.171.176:30444';
+        document.getElementById('apiUrl').textContent = API_GATEWAY_URL;
+
+        function showResult(elementId, message, type = 'info') {
+            const el = document.getElementById(elementId);
+            el.style.display = 'block';
+            el.className = `result ${type}`;
+            el.textContent = message;
+        }
+
+        async function testProducts() {
+            showResult('result-core', 'Testing Products API...', 'info');
+            try {
+                const response = await fetch(`${API_GATEWAY_URL}/api/products`, {
+                    method: 'GET'
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    showResult('result-core', `✅ Products API: HTTP ${response.status}\n${JSON.stringify(data, null, 2)}`, 'success');
+                } else {
+                    showResult('result-core', `❌ Products API: HTTP ${response.status}\nError: ${data.error || 'Unknown'}`, 'error');
+                }
+            } catch (error) {
+                showResult('result-core', `❌ Products API: Network Error\n${error.message}`, 'error');
+            }
+        }
+
+        async function testRecommendations() {
+            showResult('result-core', 'Testing Recommendations API...', 'info');
+            try {
+                const response = await fetch(`${API_GATEWAY_URL}/api/recommendations`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        user_id: 'test_user',
+                        context: 'Looking for wireless headphones'
+                    })
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    showResult('result-core', `✅ Recommendations API: HTTP ${response.status}\n${JSON.stringify(data, null, 2)}`, 'success');
+                } else {
+                    showResult('result-core', `❌ Recommendations API: HTTP ${response.status}\nError: ${data.error || 'Unknown'}`, 'error');
+                }
+            } catch (error) {
+                showResult('result-core', `❌ Recommendations API: Network Error\n${error.message}`, 'error');
+            }
+        }
+
+        async function testScene9() {
+            showResult('result-demo', 'Testing Scene 9 (Database APM)...', 'info');
+            try {
+                const response = await fetch(`${API_GATEWAY_URL}/api/demo/inject-telemetry`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    showResult('result-demo', `✅ Scene 9: HTTP ${response.status}\n${JSON.stringify(data, null, 2)}`, 'success');
+                } else {
+                    showResult('result-demo', `❌ Scene 9: HTTP ${response.status}\nError: ${data.error || 'Unknown'}`, 'error');
+                }
+            } catch (error) {
+                showResult('result-demo', `❌ Scene 9: Network Error\n${error.message}`, 'error');
+            }
+        }
+
+        async function testSlowDatabase() {
+            showResult('result-demo', 'Testing Slow Database...', 'info');
+            try {
+                const response = await fetch(`${API_GATEWAY_URL}/api/demo/trigger-slow-queries`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await response.json();
+                showResult('result-demo', `${response.ok ? '✅' : '❌'} Slow Database: HTTP ${response.status}\n${JSON.stringify(data, null, 2)}`, response.ok ? 'success' : 'error');
+            } catch (error) {
+                showResult('result-demo', `❌ Slow Database: Network Error\n${error.message}`, 'error');
+            }
+        }
+
+        async function testPoolExhaustion() {
+            showResult('result-demo', 'Testing Pool Exhaustion...', 'info');
+            try {
+                const response = await fetch(`${API_GATEWAY_URL}/api/demo/trigger-pool-exhaustion`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await response.json();
+                showResult('result-demo', `${response.ok ? '✅' : '❌'} Pool Exhaustion: HTTP ${response.status}\n${JSON.stringify(data, null, 2)}`, response.ok ? 'success' : 'error');
+            } catch (error) {
+                showResult('result-demo', `❌ Pool Exhaustion: Network Error\n${error.message}`, 'error');
+            }
+        }
+
+        async function testHealth() {
+            showResult('result-health', 'Testing API Gateway Health...', 'info');
+            try {
+                const response = await fetch(`${API_GATEWAY_URL}/api/health`);
+                const data = await response.json();
+                showResult('result-health', `${response.ok ? '✅' : '❌'} Health: HTTP ${response.status}\n${JSON.stringify(data, null, 2)}`, response.ok ? 'success' : 'error');
+            } catch (error) {
+                showResult('result-health', `❌ Health: Network Error\n${error.message}`, 'error');
+            }
+        }
+
+        async function testAllEndpoints() {
+            document.getElementById('overallStatus').textContent = 'Testing...';
+            const summary = document.getElementById('summary');
+            summary.textContent = 'Running comprehensive test...\n\n';
+            summary.className = 'result';
+
+            const endpoints = [
+                { name: 'Health', url: '/api/health', method: 'GET' },
+                { name: 'Products', url: '/api/products', method: 'GET' },
+                { name: 'Recommendations', url: '/api/recommendations', method: 'POST', body: { user_id: 'test', context: 'test' } },
+                { name: 'Scene 9', url: '/api/demo/inject-telemetry', method: 'POST' },
+                { name: 'Slow Database', url: '/api/demo/trigger-slow-queries', method: 'POST' },
+                { name: 'Pool Exhaustion', url: '/api/demo/trigger-pool-exhaustion', method: 'POST' }
+            ];
+
+            let results = [];
+            let successCount = 0;
+
+            for (const endpoint of endpoints) {
+                try {
+                    const options = {
+                        method: endpoint.method,
+                        headers: { 'Content-Type': 'application/json' }
+                    };
+                    if (endpoint.body) {
+                        options.body = JSON.stringify(endpoint.body);
+                    }
+
+                    const response = await fetch(`${API_GATEWAY_URL}${endpoint.url}`, options);
+                    const data = await response.json().catch(() => ({ error: 'Invalid JSON' }));
+
+                    if (response.ok) {
+                        results.push(`✅ ${endpoint.name}: HTTP ${response.status} OK`);
+                        successCount++;
+                    } else {
+                        results.push(`❌ ${endpoint.name}: HTTP ${response.status} - ${data.error || 'Error'}`);
+                    }
+                } catch (error) {
+                    results.push(`❌ ${endpoint.name}: ${error.message}`);
+                }
+            }
+
+            const summaryText = `Test Complete: ${successCount}/${endpoints.length} endpoints working\n\n${results.join('\n')}`;
+            summary.textContent = summaryText;
+            summary.className = `result ${successCount === endpoints.length ? 'success' : 'error'}`;
+            document.getElementById('overallStatus').textContent = `${successCount}/${endpoints.length} Working`;
+        }
+    </script>
+</body>
+</html>
+

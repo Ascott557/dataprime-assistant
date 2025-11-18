@@ -1,0 +1,147 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: dataprime-demo
+  labels:
+    app: postgres
+spec:
+  ports:
+  - port: 5432
+    targetPort: 5432
+    protocol: TCP
+    name: postgres
+  selector:
+    app: postgres
+  clusterIP: None  # Headless service for StatefulSet
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init-script
+  namespace: dataprime-demo
+data:
+  init.sql: |
+    -- Create products table first
+    CREATE TABLE IF NOT EXISTS products (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        category VARCHAR(100) NOT NULL,
+        price DECIMAL(10, 2) NOT NULL,
+        description TEXT,
+        image_url VARCHAR(500),
+        stock_quantity INTEGER DEFAULT 0
+    );
+    
+    -- Insert products for demo
+    INSERT INTO products (name, category, price, description, image_url, stock_quantity) VALUES
+    ('Sony WH-1000XM5', 'Headphones', 299.99, 'Industry-leading noise canceling', 'https://example.com/sony-xm5.jpg', 45),
+    ('Bose QuietComfort 45', 'Headphones', 279.99, 'Quiet Mode for full noise cancelling', 'https://example.com/bose-qc45.jpg', 62),
+    ('Apple AirPods Pro', 'Headphones', 249.00, 'Active Noise Cancellation', 'https://example.com/airpods-pro.jpg', 120),
+    ('Sennheiser HD 450BT', 'Wireless Headphones', 89.99, 'Great sound quality with ANC', 'https://example.com/sennheiser-450.jpg', 72),
+    ('JBL Tune 510BT', 'Wireless Headphones', 29.99, 'Budget-friendly Bluetooth headphones', 'https://example.com/jbl-510.jpg', 150),
+    ('Anker Soundcore Q30', 'Wireless Headphones', 59.99, 'Value ANC headphones', 'https://example.com/anker-q30.jpg', 88),
+    ('Samsung Galaxy Buds Pro', 'Earbuds', 199.99, 'Intelligent ANC and 360 Audio', 'https://example.com/galaxy-buds-pro.jpg', 95),
+    ('Jabra Elite 85t', 'Earbuds', 179.99, 'Advanced ANC with customizable sound', 'https://example.com/jabra-85t.jpg', 54),
+    ('Beats Studio Buds', 'Earbuds', 149.99, 'True wireless noise cancelling earbuds', 'https://example.com/beats-studio.jpg', 78)
+    ON CONFLICT DO NOTHING;
+    
+    -- Orders table for order-service
+    CREATE TABLE IF NOT EXISTS orders (
+        id SERIAL PRIMARY KEY,
+        user_id VARCHAR(100) NOT NULL,
+        product_id INTEGER NOT NULL,
+        quantity INTEGER NOT NULL DEFAULT 1,
+        order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (product_id) REFERENCES products(id)
+    );
+    
+    -- Add some sample orders for demo
+    INSERT INTO orders (user_id, product_id, quantity) VALUES
+    ('demo_user_1', 5, 1),  -- JBL Tune 510BT
+    ('demo_user_2', 6, 2),  -- Anker Soundcore Q30
+    ('demo_user_1', 5, 1),  -- JBL again (popular!)
+    ('demo_user_3', 7, 1),  -- Samsung Galaxy Buds Pro
+    ('demo_user_4', 6, 1),  -- Anker Soundcore Q30
+    ('demo_user_5', 5, 1),  -- JBL again
+    ('demo_user_2', 8, 1)   -- Jabra Elite 85t
+    ON CONFLICT DO NOTHING;
+    
+    -- Create index for performance
+    CREATE INDEX IF NOT EXISTS idx_orders_product_id ON orders(product_id);
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: dataprime-demo
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:14
+        ports:
+        - containerPort: 5432
+          name: postgres
+        env:
+        - name: POSTGRES_DB
+          value: "productcatalog"
+        - name: POSTGRES_USER
+          value: "dbadmin"
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: dataprime-secrets
+              key: DB_PASSWORD
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+        volumeMounts:
+        - name: postgres-data
+          mountPath: /var/lib/postgresql/data
+        - name: postgres-init
+          mountPath: /docker-entrypoint-initdb.d
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - dbadmin
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - dbadmin
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: postgres-init
+        configMap:
+          name: postgres-init-script
+  volumeClaimTemplates:
+  - metadata:
+      name: postgres-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 1Gi
+

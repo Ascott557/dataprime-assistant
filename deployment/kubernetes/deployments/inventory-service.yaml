@@ -1,0 +1,118 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inventory-service
+  namespace: dataprime-demo
+  labels:
+    app: inventory-service
+    component: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: inventory-service
+  template:
+    metadata:
+      labels:
+        app: inventory-service
+        component: backend
+    spec:
+      containers:
+      - name: inventory-service
+        image: inventory-service:latest
+        imagePullPolicy: Never
+        command: ["python", "-u", "services/inventory_service.py"]
+        ports:
+        - containerPort: 8015
+          name: http
+        env:
+        # Service Configuration
+        - name: SERVICE_NAME
+          value: "inventory-service"
+        - name: SERVICE_PORT
+          value: "8015"
+        
+        # OTel Configuration
+        - name: OTEL_SERVICE_NAME
+          value: "inventory-service"
+        - name: CX_APPLICATION_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: dataprime-config
+              key: CX_APPLICATION_NAME
+        - name: CX_SUBSYSTEM_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: dataprime-config
+              key: CX_SUBSYSTEM_NAME
+        - name: CX_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: dataprime-secrets
+              key: CX_TOKEN
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: dataprime-config
+              key: OTEL_EXPORTER_OTLP_ENDPOINT
+        
+        # Database Configuration
+        - name: DB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: dataprime-config
+              key: DB_HOST
+        - name: DB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: dataprime-config
+              key: DB_PORT
+        - name: DB_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: dataprime-config
+              key: DB_NAME
+        - name: DB_USER
+          valueFrom:
+            configMapKeyRef:
+              name: dataprime-config
+              key: DB_USER
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: dataprime-secrets
+              key: DB_PASSWORD
+        - name: DB_MAX_CONNECTIONS
+          valueFrom:
+            configMapKeyRef:
+              name: dataprime-config
+              key: DB_MAX_CONNECTIONS
+        
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8015
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8015
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+      
+      restartPolicy: Always
+

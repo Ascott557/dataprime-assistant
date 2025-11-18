@@ -1,0 +1,72 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ecommerce-ingress
+  namespace: dataprime-demo
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+spec:
+  tls:
+    - hosts:
+        - ecommerce.local
+      secretName: ecommerce-tls
+  rules:
+    - host: ecommerce.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 8020
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: api-gateway
+                port:
+                  number: 8010
+---
+# LoadBalancer service for HTTPS access
+apiVersion: v1
+kind: Service
+metadata:
+  name: https-frontend
+  namespace: dataprime-demo
+spec:
+  type: NodePort
+  ports:
+    - name: https
+      port: 443
+      targetPort: 8020
+      nodePort: 30443
+      protocol: TCP
+    - name: http
+      port: 80
+      targetPort: 8020
+      nodePort: 30080
+      protocol: TCP
+  selector:
+    app: frontend
+---
+# HTTPS-enabled API Gateway service
+apiVersion: v1
+kind: Service
+metadata:
+  name: https-api-gateway
+  namespace: dataprime-demo
+spec:
+  type: NodePort
+  ports:
+    - name: https-api
+      port: 443
+      targetPort: 8010
+      nodePort: 30443
+      protocol: TCP
+  selector:
+    app: api-gateway
+

@@ -56,11 +56,11 @@ def ensure_telemetry_initialized():
         provider = TracerProvider(resource=resource)
         trace.set_tracer_provider(provider)
         
-        # Export to local OTel Collector using standard OTLP
+        # Export to local OTel Collector using insecure gRPC
         otlp_exporter = OTLPSpanExporter(endpoint=otel_endpoint, insecure=True)
         provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
         
-        print("✅ OTLP exporter configured for OTel Collector")
+        print("✅ OTLP exporter configured for local OTel Collector")
         
         # Enable content capture via environment variables BEFORE instrumenting
         # These environment variables control OpenTelemetry GenAI semantic conventions

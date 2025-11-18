@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-frontend
+  namespace: dataprime-demo
+  labels:
+    app: demo-frontend
+    component: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: demo-frontend
+  template:
+    metadata:
+      labels:
+        app: demo-frontend
+        component: frontend
+    spec:
+      containers:
+      - name: demo-frontend
+        image: docker.io/library/ecommerce-services:latest
+        imagePullPolicy: Never
+        command: ["python3", "services/demo_frontend.py"]
+        ports:
+        - containerPort: 30017
+          name: http
+        env:
+        - name: PORT
+          value: "30017"
+        - name: EXTERNAL_HOST
+          value: "54.235.171.176"  # EC2 external IP
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "coralogix-opentelemetry-collector.dataprime-demo.svc.cluster.local:4317"
+        - name: OTEL_SERVICE_NAME
+          value: "demo-frontend"
+        - name: OTEL_RESOURCE_ATTRIBUTES
+          value: "service.name=demo-frontend,deployment.environment=production,service.namespace=dataprime-demo"
+        - name: CX_APPLICATION_NAME
+          value: "ECOMM_RECCOMENDATION"
+        - name: CX_SUBSYSTEM_NAME
+          value: "ecommerce-production"
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 30017
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 30017
+          initialDelaySeconds: 5
+          periodSeconds: 10
+

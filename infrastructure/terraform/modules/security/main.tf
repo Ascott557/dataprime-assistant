@@ -49,6 +49,60 @@ resource "aws_security_group" "main" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  # K3s NodePort - API Gateway HTTP (30010)
+  ingress {
+    description = "K3s API Gateway HTTP"
+    from_port   = 30010
+    to_port     = 30010
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # K3s NodePort - Frontend HTTPS (30443)
+  ingress {
+    description = "K3s Frontend HTTPS"
+    from_port   = 30443
+    to_port     = 30443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # K3s NodePort - API Gateway HTTPS (30444)
+  ingress {
+    description = "K3s API Gateway HTTPS"
+    from_port   = 30444
+    to_port     = 30444
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # K3s NodePort - Inventory Service (30015)
+  ingress {
+    description = "K3s Inventory Service"
+    from_port   = 30015
+    to_port     = 30015
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # K3s NodePort - Order Service (30016)
+  ingress {
+    description = "K3s Order Service"
+    from_port   = 30016
+    to_port     = 30016
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # K3s NodePort - Demo Frontend (30017)
+  ingress {
+    description = "K3s Demo Frontend"
+    from_port   = 30017
+    to_port     = 30017
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
   # Allow all outbound traffic
   egress {
     description = "Allow all outbound"

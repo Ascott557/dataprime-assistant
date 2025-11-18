@@ -34,8 +34,8 @@ terraform {
 
   # Backend configuration - S3 state storage
   backend "s3" {
-    bucket         = "dataprime-demo-terraform-state-b41d647f"
-    key            = "dataprime-demo/terraform.tfstate"
+    bucket         = "dataprime-demo-terraform-state-ffa1bc17"
+    key            = "ecommerce-demo/terraform.tfstate"
     region         = "us-east-1"
     dynamodb_table = "dataprime-demo-terraform-locks"
     encrypt        = true
@@ -118,6 +118,8 @@ module "ec2" {
   redis_url            = var.redis_url
   otel_endpoint        = var.otel_endpoint
   repository_url       = var.repository_url
+  cx_rum_public_key    = var.cx_rum_public_key
+  db_password          = var.db_password
 
   depends_on = [module.vpc, module.security]
 }

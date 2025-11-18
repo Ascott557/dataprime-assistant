@@ -126,6 +126,19 @@ variable "coralogix_aws_account_id" {
 # Application Configuration
 ###############################################################################
 
+variable "cx_rum_public_key" {
+  description = "Coralogix RUM Public Key for browser monitoring"
+  type        = string
+  sensitive   = true
+}
+
+variable "db_password" {
+  description = "PostgreSQL database password"
+  type        = string
+  default     = "demo_password"
+  sensitive   = true
+}
+
 variable "redis_url" {
   description = "Redis connection URL (containerized)"
   type        = string

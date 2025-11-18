@@ -22,6 +22,7 @@ spec:
         - name: frontend
           image: dataprime-frontend:latest
           imagePullPolicy: Never
+          command: ["python", "app/ecommerce_frontend.py"]
           env:
             - name: HOST_IP
               valueFrom:
@@ -43,7 +44,10 @@ spec:
                   name: dataprime-config
                   key: CX_APPLICATION_NAME
             - name: CX_SUBSYSTEM_NAME
-              value: "frontend"
+              valueFrom:
+                configMapKeyRef:
+                  name: dataprime-config
+                  key: CX_SUBSYSTEM_NAME
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               valueFrom:
                 configMapKeyRef:
@@ -55,6 +59,13 @@ spec:
               value: "frontend"
             - name: SERVICE_VERSION
               value: "1.0.0"
+            - name: CX_RUM_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: dataprime-secrets
+                  key: CX_RUM_API_KEY
+            - name: API_GATEWAY_URL
+              value: "https://54.235.171.176:30444"  # HTTPS via proxy to API Gateway
           ports:
             - containerPort: 8020
               name: http

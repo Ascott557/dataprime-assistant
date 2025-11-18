@@ -37,6 +37,8 @@ locals {
     project_name           = var.project_name
     environment            = var.environment
     repository_url         = var.repository_url
+    cx_rum_public_key      = var.cx_rum_public_key
+    db_password            = var.db_password
   })
 }
 

@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Frontend Button Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .test-section {
+            background: white;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        button {
+            background: #e74c3c;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 16px;
+            cursor: pointer;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        button:hover {
+            background: #c0392b;
+        }
+        .log {
+            background: #2c3e50;
+            color: #0f0;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 400px;
+            overflow-y: auto;
+            margin-top: 10px;
+        }
+        .success { color: #2ecc71; }
+        .error { color: #e74c3c; }
+        .info { color: #3498db; }
+    </style>
+</head>
+<body>
+    <div class="test-section">
+        <h1>🔧 Frontend Button Diagnostic</h1>
+        <p>This page tests if the Scene 9 button works from your browser.</p>
+        
+        <button onclick="testButton()">🔥 Test Scene 9 Button</button>
+        
+        <div class="log" id="log"></div>
+    </div>
+
+    <script>
+        const API_GATEWAY_URL = 'https://54.235.171.176:30444';
+        
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString();
+            const colorClass = type === 'error' ? 'error' : type === 'success' ? 'success' : 'info';
+            logDiv.innerHTML += `<div class="${colorClass}">[${timestamp}] ${message}</div>`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        async function testButton() {
+            document.getElementById('log').innerHTML = '';
+            
+            log('Starting Scene 9 button test...', 'info');
+            log(`API Gateway URL: ${API_GATEWAY_URL}`, 'info');
+            log('', 'info');
+            
+            log('Step 1: Testing HTTPS connection...', 'info');
+            
+            try {
+                log(`Sending POST to: ${API_GATEWAY_URL}/api/demo/inject-telemetry`, 'info');
+                
+                const response = await fetch(`${API_GATEWAY_URL}/api/demo/inject-telemetry`, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                log(`Response status: ${response.status}`, response.ok ? 'success' : 'error');
+                log(`Response OK: ${response.ok}`, response.ok ? 'success' : 'error');
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    log('', 'info');
+                    log('✅ SUCCESS! Response data:', 'success');
+                    log(JSON.stringify(data, null, 2), 'success');
+                    log('', 'info');
+                    log(`Spans created: ${data.spans_created}`, 'success');
+                    log(`Services: ${data.services.join(', ')}`, 'success');
+                    log('', 'info');
+                    log('🎉 Button is working correctly!', 'success');
+                    log('Check Coralogix: APM → Database Monitoring → productcatalog', 'success');
+                } else {
+                    log(`❌ Error: HTTP ${response.status}`, 'error');
+                    const text = await response.text();
+                    log(`Response body: ${text}`, 'error');
+                }
+                
+            } catch (error) {
+                log('', 'info');
+                log('❌ REQUEST FAILED:', 'error');
+                log(`Error type: ${error.name}`, 'error');
+                log(`Error message: ${error.message}`, 'error');
+                log('', 'info');
+                
+                if (error.message.includes('Failed to fetch')) {
+                    log('This usually means:', 'error');
+                    log('1. Mixed content (HTTPS→HTTP) blocked', 'error');
+                    log('2. CORS policy blocking request', 'error');
+                    log('3. Network/firewall blocking connection', 'error');
+                    log('4. Server not responding', 'error');
+                }
+                
+                log('', 'info');
+                log('Check browser console (F12) for more details', 'error');
+            }
+        }
+        
+        // Auto-test on load
+        log('Page loaded. Click button to test Scene 9.', 'info');
+        log('Or check browser console (F12) for JavaScript errors.', 'info');
+    </script>
+</body>
+</html>
+

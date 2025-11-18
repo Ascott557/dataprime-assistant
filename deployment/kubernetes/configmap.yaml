@@ -9,17 +9,31 @@ metadata:
 data:
   # Coralogix Configuration
   CX_DOMAIN: "eu2.coralogix.com"
-  CX_APPLICATION_NAME: "dataprime-demo"
+  CX_APPLICATION_NAME: "ecommerce-recommendation"
+  CX_SUBSYSTEM_NAME: "ecommerce-production"
   
   # Redis Configuration
   REDIS_URL: "redis://redis:6379/0"
   
-  # OpenTelemetry Configuration
-  # Send to agent daemonset (has k8sattributes processor for pod metadata enrichment)
-  # Using hostPort so each pod sends to the agent running on its node
-  OTEL_EXPORTER_OTLP_ENDPOINT: "http://$(HOST_IP):4317"
+  # OpenTelemetry Configuration  
+  # Send traces to local OTel Collector (which forwards to Coralogix)
+  OTEL_EXPORTER_OTLP_ENDPOINT: "otel-collector.dataprime-demo.svc.cluster.local:4317"
+  
+  # Database Configuration
+  DB_HOST: "postgres"
+  DB_PORT: "5432"
+  DB_NAME: "productcatalog"
+  DB_USER: "dbadmin"
+  DB_MAX_CONNECTIONS: "100"
+  
+  # Service URLs (for inter-service communication)
+  PRODUCT_SERVICE_URL: "http://product-service:8014"
+  RECOMMENDATION_AI_URL: "http://recommendation-ai:8011"
+  VALIDATION_SERVICE_URL: "http://validation-service:8012"
+  STORAGE_SERVICE_URL: "http://storage-service:8015"
+  QUEUE_SERVICE_URL: "http://queue-service:8013"
   
   # Environment
   ENVIRONMENT: "production"
-  PROJECT_NAME: "dataprime-demo"
+  PROJECT_NAME: "ecommerce-recommendation"
 

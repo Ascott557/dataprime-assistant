@@ -128,7 +128,7 @@ data:
         domain: "${env:CX_DOMAIN}"
         private_key: "${env:CX_TOKEN}"
         application_name: "${env:CX_APPLICATION_NAME}"
-        subsystem_name: "k3s-infrastructure"
+        subsystem_name: "${env:CX_SUBSYSTEM_NAME}"
         timeout: 30s
         compression: gzip
         retry_on_failure:
@@ -244,6 +244,11 @@ spec:
                 configMapKeyRef:
                   name: dataprime-config
                   key: CX_APPLICATION_NAME
+            - name: CX_SUBSYSTEM_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: dataprime-config
+                  key: CX_SUBSYSTEM_NAME
             - name: K8S_NODE_NAME
               valueFrom:
                 fieldRef:

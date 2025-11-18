@@ -88,3 +88,15 @@ variable "repository_url" {
   type        = string
   default     = "https://github.com/coralogix/dataprime-assistant.git"
 }
+
+variable "cx_rum_public_key" {
+  description = "Coralogix RUM Public Key for browser monitoring"
+  type        = string
+  sensitive   = true
+}
+
+variable "db_password" {
+  description = "PostgreSQL database password"
+  type        = string
+  sensitive   = true
+}

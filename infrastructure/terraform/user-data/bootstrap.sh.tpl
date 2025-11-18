@@ -1,28 +1,29 @@
 #!/bin/bash
 ###############################################################################
-# DataPrime Demo - EC2 Bootstrap Script
+# E-commerce Recommendation System - EC2 Bootstrap Script (K3s)
 # 
 # This script:
 # 1. Updates system and installs dependencies
-# 2. Installs Docker and Docker Compose
+# 2. Installs K3s and Helm
 # 3. Clones application code
-# 4. Creates environment configuration
-# 5. Starts all services via Docker Compose
-# 6. Configures systemd service for auto-restart
-# 7. Sets up firewall rules
-# 8. Configures health check monitoring
+# 4. Creates Kubernetes secrets
+# 5. Deploys PostgreSQL
+# 6. Installs Coralogix OpenTelemetry Collector
+# 7. Deploys application services
+# 8. Sets up firewall rules
+# 9. Configures health check monitoring
 #
-# All output is logged to /var/log/dataprime-bootstrap.log
+# All output is logged to /var/log/ecommerce-bootstrap.log
 ###############################################################################
 
 set -euo pipefail
 
 # Logging setup
-LOGFILE="/var/log/dataprime-bootstrap.log"
+LOGFILE="/var/log/ecommerce-bootstrap.log"
 exec > >(tee -a "$LOGFILE") 2>&1
 
 echo "======================================================================"
-echo "DataPrime Demo Bootstrap - Started at $(date)"
+echo "E-commerce Recommendation System Bootstrap - Started at $(date)"
 echo "======================================================================"
 
 # Environment variables from Terraform
@@ -31,13 +32,14 @@ export CX_DOMAIN="${coralogix_domain}"
 export CX_APPLICATION_NAME="${coralogix_app_name}"
 export CX_SUBSYSTEM_NAME="${coralogix_subsystem}"
 export OPENAI_API_KEY="${openai_api_key}"
-export REDIS_URL="${redis_url}"
-export OTEL_EXPORTER_OTLP_ENDPOINT="${otel_endpoint}"
+export CX_RUM_PUBLIC_KEY="${cx_rum_public_key}"
+export DB_PASSWORD="${db_password}"
 export PROJECT_NAME="${project_name}"
 export ENVIRONMENT="${environment}"
 
 # Application directory
 APP_DIR="/opt/dataprime-assistant"
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
 ###############################################################################
 # 1. System Update and Dependencies
@@ -55,38 +57,39 @@ apt-get install -y \
   jq \
   ca-certificates \
   gnupg \
-  lsb-release \
+  postgresql-client \
   apt-transport-https \
   software-properties-common
 
+echo "[1/9] System dependencies installed!"
+
 ###############################################################################
-# 2. Install Docker and Docker Compose
+# 2. Install K3s and Helm
 ###############################################################################
-echo "[2/9] Installing Docker..."
+echo "[2/9] Installing K3s..."
 
-# Add Docker's official GPG key
-install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-chmod a+r /etc/apt/keyrings/docker.gpg
+# Install K3s
+curl -sfL https://get.k3s.io | sh -s - \
+  --write-kubeconfig-mode 644 \
+  --disable traefik \
+  --node-name $(hostname)
 
-# Add Docker repository
-echo \
-  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-  $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+# Wait for K3s to be ready
+echo "Waiting for K3s to be ready..."
+until kubectl get nodes 2>/dev/null | grep -q Ready; do
+  echo "  Waiting for K3s..."
+  sleep 5
+done
 
-# Install Docker
-apt-get update -y
-apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+echo "K3s is ready!"
+kubectl get nodes
 
-# Start and enable Docker
-systemctl start docker
-systemctl enable docker
+# Install Helm
+echo "Installing Helm..."
+curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+helm version
 
-# Verify Docker installation
-docker --version
-docker compose version
-
-echo "[2/9] Docker installed successfully!"
+echo "[2/9] K3s and Helm installed successfully!"
 
 ###############################################################################
 # 3. Clone Application Code
@@ -98,7 +101,7 @@ mkdir -p "$APP_DIR"
 cd "$APP_DIR"
 
 # Clone repository (or use pre-uploaded code)
-if [ ! -d "$APP_DIR/coralogix-dataprime-demo" ]; then
+if [ ! -d "$APP_DIR/.git" ]; then
   echo "Cloning repository from ${repository_url}..."
   git clone "${repository_url}" .
 else
@@ -106,111 +109,101 @@ else
   git pull
 fi
 
-###############################################################################
-# 4. Create Environment Configuration
-###############################################################################
-echo "[4/9] Creating environment configuration..."
-
-cat > "$APP_DIR/deployment/docker/.env.vm" <<EOF
-# Coralogix Configuration
-CX_TOKEN=$${CX_TOKEN}
-CX_DOMAIN=$${CX_DOMAIN}
-CX_APPLICATION_NAME=$${CX_APPLICATION_NAME}
-CX_SUBSYSTEM_NAME=$${CX_SUBSYSTEM_NAME}
-
-# OpenAI Configuration
-OPENAI_API_KEY=$${OPENAI_API_KEY}
-
-# Redis Configuration
-REDIS_URL=$${REDIS_URL}
-
-# OpenTelemetry Configuration
-OTEL_EXPORTER_OTLP_ENDPOINT=$${OTEL_EXPORTER_OTLP_ENDPOINT}
-
-# Environment
-ENVIRONMENT=$${ENVIRONMENT}
-PROJECT_NAME=$${PROJECT_NAME}
-EOF
-
-chmod 600 "$APP_DIR/deployment/docker/.env.vm"
-
-echo "[4/9] Environment configuration created!"
+echo "[3/9] Application code ready!"
 
 ###############################################################################
-# 5. Generate SSL Certificates
+# 4. Create Kubernetes Namespace and Secrets
 ###############################################################################
-echo "[5/9] Generating self-signed SSL certificates..."
+echo "[4/9] Creating Kubernetes namespace and secrets..."
 
-mkdir -p "$APP_DIR/deployment/docker/nginx/ssl"
+# Create namespace
+kubectl create namespace dataprime-demo --dry-run=client -o yaml | kubectl apply -f -
 
-openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-  -keyout "$APP_DIR/deployment/docker/nginx/ssl/dataprime.key" \
-  -out "$APP_DIR/deployment/docker/nginx/ssl/dataprime.crt" \
-  -subj "/C=US/ST=State/L=City/O=Coralogix/CN=dataprime-demo" \
-  2>&1
+# Create secrets
+kubectl create secret generic dataprime-secrets \
+  --from-literal=OPENAI_API_KEY="$${OPENAI_API_KEY}" \
+  --from-literal=CX_TOKEN="$${CX_TOKEN}" \
+  --from-literal=DB_PASSWORD="$${DB_PASSWORD}" \
+  --from-literal=CX_RUM_PUBLIC_KEY="$${CX_RUM_PUBLIC_KEY}" \
+  -n dataprime-demo \
+  --dry-run=client -o yaml | kubectl apply -f -
 
-chmod 600 "$APP_DIR/deployment/docker/nginx/ssl/dataprime.key"
-chmod 644 "$APP_DIR/deployment/docker/nginx/ssl/dataprime.crt"
-
-echo "[5/9] SSL certificates generated!"
-
-###############################################################################
-# 6. Start Docker Compose Services
-###############################################################################
-echo "[6/9] Starting Docker Compose services..."
-
-cd "$APP_DIR/deployment/docker"
-
-# Pull images first
-docker compose --env-file .env.vm -f docker-compose.vm.yml pull
-
-# Build custom images
-docker compose --env-file .env.vm -f docker-compose.vm.yml build --no-cache
-
-# Start services
-docker compose --env-file .env.vm -f docker-compose.vm.yml up -d
-
-echo "[6/9] Waiting for services to initialize (60 seconds)..."
-sleep 60
-
-# Check service status
-docker compose --env-file .env.vm -f docker-compose.vm.yml ps
-
-echo "[6/9] Docker Compose services started!"
+echo "[4/9] Secrets created!"
 
 ###############################################################################
-# 7. Configure Systemd Service for Auto-Restart
+# 5. Apply ConfigMap
 ###############################################################################
-echo "[7/9] Configuring systemd service..."
+echo "[5/9] Applying ConfigMap..."
 
-cat > /etc/systemd/system/dataprime-demo.service <<EOF
-[Unit]
-Description=DataPrime Demo Application
-Requires=docker.service
-After=docker.service
+kubectl apply -f "$APP_DIR/deployment/kubernetes/configmap.yaml"
 
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-WorkingDirectory=$APP_DIR/deployment/docker
-ExecStart=/usr/bin/docker compose --env-file .env.vm -f docker-compose.vm.yml up -d
-ExecStop=/usr/bin/docker compose --env-file .env.vm -f docker-compose.vm.yml down
-ExecReload=/usr/bin/docker compose --env-file .env.vm -f docker-compose.vm.yml restart
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# Reload systemd and enable service
-systemctl daemon-reload
-systemctl enable dataprime-demo.service
-
-echo "[7/9] Systemd service configured!"
+echo "[5/9] ConfigMap applied!"
 
 ###############################################################################
-# 8. Configure Firewall (UFW)
+# 6. Deploy PostgreSQL
 ###############################################################################
-echo "[8/9] Configuring firewall..."
+echo "[6/9] Deploying PostgreSQL..."
+
+kubectl apply -f "$APP_DIR/deployment/kubernetes/postgres-init-configmap.yaml"
+kubectl apply -f "$APP_DIR/deployment/kubernetes/postgres-statefulset.yaml"
+
+# Wait for PostgreSQL to be ready
+echo "Waiting for PostgreSQL to be ready..."
+kubectl wait --for=condition=ready pod -l app=postgres -n dataprime-demo --timeout=300s || true
+
+echo "[6/9] PostgreSQL deployed!"
+
+###############################################################################
+# 7. Install Coralogix OpenTelemetry Collector
+###############################################################################
+echo "[7/9] Installing Coralogix OpenTelemetry Collector..."
+
+# Add Coralogix Helm repo
+helm repo add coralogix https://cgx.jfrog.io/artifactory/coralogix-charts-virtual
+helm repo update
+
+# Create secret for Coralogix keys (used by Helm chart)
+kubectl create secret generic coralogix-keys \
+  --from-literal=PRIVATE_KEY="$${CX_TOKEN}" \
+  -n dataprime-demo \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+# Install Coralogix OpenTelemetry Collector
+helm upgrade --install coralogix-otel coralogix/otel-integration \
+  -f "$APP_DIR/deployment/kubernetes/coralogix-infra-values.yaml" \
+  -n dataprime-demo \
+  --wait \
+  --timeout 5m
+
+echo "[7/9] Coralogix OpenTelemetry Collector installed!"
+
+###############################################################################
+# 8. Deploy Application Services
+###############################################################################
+echo "[8/9] Deploying application services..."
+
+# Apply services first
+kubectl apply -f "$APP_DIR/deployment/kubernetes/services.yaml"
+
+# Deploy application deployments
+kubectl apply -f "$APP_DIR/deployment/kubernetes/deployments/"
+
+# Wait for deployments to be ready
+echo "Waiting for deployments to be ready..."
+kubectl wait --for=condition=available deployment -l service -n dataprime-demo --timeout=300s || true
+
+echo "[8/9] Application services deployed!"
+
+# Show deployment status
+echo ""
+echo "Deployment Status:"
+kubectl get pods -n dataprime-demo
+echo ""
+
+###############################################################################
+# 9. Configure Firewall (UFW)
+###############################################################################
+echo "[9/9] Configuring firewall..."
 
 # Install UFW if not already installed
 apt-get install -y ufw
@@ -220,56 +213,17 @@ ufw --force reset
 ufw default deny incoming
 ufw default allow outgoing
 
-# Allow SSH, HTTP, HTTPS
+# Allow SSH, HTTP, HTTPS, NodePorts
 ufw allow 22/tcp comment 'SSH'
 ufw allow 80/tcp comment 'HTTP'
 ufw allow 443/tcp comment 'HTTPS'
-ufw allow 8010/tcp comment 'API Gateway'
+ufw allow 30010/tcp comment 'API Gateway NodePort'
+ufw allow 30020/tcp comment 'Frontend NodePort'
 
 # Enable UFW
 ufw --force enable
 
-echo "[8/9] Firewall configured!"
-
-###############################################################################
-# 9. Set Up Health Check Monitoring
-###############################################################################
-echo "[9/9] Setting up health check monitoring..."
-
-cat > /usr/local/bin/dataprime-health-check.sh <<'EOF'
-#!/bin/bash
-# Health check script for DataPrime Demo
-
-LOGFILE="/var/log/dataprime-health-check.log"
-APP_DIR="/opt/dataprime-assistant"
-
-echo "=== Health Check - $(date) ===" >> "$LOGFILE"
-
-cd "$APP_DIR/deployment/docker"
-
-# Check if all containers are running
-UNHEALTHY=$(docker compose --env-file .env.vm -f docker-compose.vm.yml ps | grep -v "Up" | grep -v "NAME" | wc -l)
-
-if [ "$UNHEALTHY" -gt 0 ]; then
-  echo "WARNING: $UNHEALTHY unhealthy containers detected!" >> "$LOGFILE"
-  docker compose --env-file .env.vm -f docker-compose.vm.yml ps >> "$LOGFILE"
-  
-  # Attempt restart
-  echo "Attempting to restart services..." >> "$LOGFILE"
-  docker compose --env-file .env.vm -f docker-compose.vm.yml restart
-else
-  echo "All containers healthy" >> "$LOGFILE"
-fi
-EOF
-
-chmod +x /usr/local/bin/dataprime-health-check.sh
-
-# Add cron job (every 5 minutes)
-cat > /etc/cron.d/dataprime-health-check <<EOF
-*/5 * * * * root /usr/local/bin/dataprime-health-check.sh
-EOF
-
-echo "[9/9] Health check monitoring configured!"
+echo "[9/9] Firewall configured!"
 
 ###############################################################################
 # Finalization
@@ -281,16 +235,21 @@ echo "Timestamp: $(date)"
 echo "Application Directory: $APP_DIR"
 echo "Log File: $LOGFILE"
 echo ""
-echo "Services Status:"
-docker compose --env-file "$APP_DIR/deployment/docker/.env.vm" -f "$APP_DIR/deployment/docker/docker-compose.vm.yml" ps
+echo "Kubernetes Status:"
+kubectl get all -n dataprime-demo
 echo ""
 echo "Access your application at:"
-echo "  https://$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)"
-echo "  or http://$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4):8010 (API)"
+PUBLIC_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
+echo "  Frontend:    http://$PUBLIC_IP:30020"
+echo "  API Gateway: http://$PUBLIC_IP:30010"
 echo ""
 echo "To check logs:"
 echo "  tail -f $LOGFILE"
-echo "  cd $APP_DIR/deployment/docker && docker compose --env-file .env.vm -f docker-compose.vm.yml logs -f"
+echo "  kubectl logs -n dataprime-demo -l app=recommendation-ai --tail=50"
+echo "  kubectl logs -n dataprime-demo -l app=product-service --tail=50"
+echo ""
+echo "To check OTel Collector:"
+echo "  kubectl logs -n dataprime-demo -l app.kubernetes.io/name=opentelemetry-collector --tail=50"
 echo "======================================================================"
 
 exit 0

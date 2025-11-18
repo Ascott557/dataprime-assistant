@@ -3,12 +3,20 @@
 
 global:
   domain: "eu2.coralogix.com"
-  clusterName: "dataprime-demo"
-  defaultApplicationName: "dataprime-demo"
+  clusterName: "ecommerce-demo"
+  defaultApplicationName: "ecommerce-recommendation"
   defaultSubsystemName: "k3s"
 
 # Secret with Coralogix API key
-# Create with: kubectl create secret generic coralogix-keys --from-literal=PRIVATE_KEY="<your-key>" -n dataprime-demo
+secret:
+  data:
+    apiKey: "cxtp_CukMevyNl9E9ukwf7A3PpwHw4cU5E6"
+
+# Coralogix Operator Configuration
+coralogixOperator:
+  region: "EU2"
+  serviceMonitor:
+    enabled: false
 
 # Enable Infrastructure Explorer (Resource Catalog)
 resourceCatalog:

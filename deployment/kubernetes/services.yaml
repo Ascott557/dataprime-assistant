@@ -18,14 +18,14 @@ spec:
   selector:
     app: api-gateway
 ---
-# Query Service
+# Recommendation AI Service (formerly query-service)
 apiVersion: v1
 kind: Service
 metadata:
-  name: query-service
+  name: recommendation-ai
   namespace: dataprime-demo
   labels:
-    app: query-service
+    app: recommendation-ai
 spec:
   type: ClusterIP
   ports:
@@ -34,7 +34,7 @@ spec:
       protocol: TCP
       name: http
   selector:
-    app: query-service
+    app: recommendation-ai
 ---
 # Validation Service
 apiVersion: v1
@@ -72,14 +72,14 @@ spec:
   selector:
     app: queue-service
 ---
-# Processing Service
+# Product Service (formerly processing-service)
 apiVersion: v1
 kind: Service
 metadata:
-  name: processing-service
+  name: product-service
   namespace: dataprime-demo
   labels:
-    app: processing-service
+    app: product-service
 spec:
   type: ClusterIP
   ports:
@@ -88,43 +88,64 @@ spec:
       protocol: TCP
       name: http
   selector:
-    app: processing-service
+    app: product-service
 ---
-# Storage Service
+# Inventory Service
 apiVersion: v1
 kind: Service
 metadata:
-  name: storage-service
+  name: inventory-service
   namespace: dataprime-demo
   labels:
-    app: storage-service
+    app: inventory-service
 spec:
-  type: ClusterIP
+  type: NodePort
   ports:
     - port: 8015
       targetPort: 8015
+      nodePort: 30015
       protocol: TCP
       name: http
   selector:
-    app: storage-service
+    app: inventory-service
 ---
-# External API Service
+# Order Service
 apiVersion: v1
 kind: Service
 metadata:
-  name: external-api-service
+  name: order-service
   namespace: dataprime-demo
   labels:
-    app: external-api-service
+    app: order-service
 spec:
-  type: ClusterIP
+  type: NodePort
   ports:
     - port: 8016
       targetPort: 8016
+      nodePort: 30016
       protocol: TCP
       name: http
   selector:
-    app: external-api-service
+    app: order-service
+---
+# Demo Frontend Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-frontend
+  namespace: dataprime-demo
+  labels:
+    app: demo-frontend
+spec:
+  type: NodePort
+  ports:
+    - port: 30017
+      targetPort: 30017
+      nodePort: 30017
+      protocol: TCP
+      name: http
+  selector:
+    app: demo-frontend
 ---
 # Queue Worker Service
 apiVersion: v1
@@ -162,6 +183,25 @@ spec:
       name: http
   selector:
     app: frontend
+---
+# PostgreSQL Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: dataprime-demo
+  labels:
+    app: postgres
+spec:
+  type: ClusterIP
+  ports:
+    - port: 5432
+      targetPort: 5432
+      protocol: TCP
+      name: postgres
+  selector:
+    app: postgres
+  clusterIP: None
 
 
 

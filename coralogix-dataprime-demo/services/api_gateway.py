@@ -26,23 +26,34 @@ from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapProp
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from app.shared_telemetry import ensure_telemetry_initialized, get_telemetry_status
 
-# Initialize telemetry for this service
+# ⚠️ CRITICAL: Initialize telemetry BEFORE getting tracer
+# This must happen before ANY trace.get_tracer() calls
+from app.shared_telemetry import ensure_telemetry_initialized, get_telemetry_status
 telemetry_enabled = ensure_telemetry_initialized()
 
-# Simple tracer - relies on shared telemetry setup
+# NOW get the tracer (after provider is set up)
 tracer = trace.get_tracer(__name__)
+
+print(f"🔍 Telemetry status after init: {get_telemetry_status()}")
+print(f"🔍 TracerProvider type: {type(trace.get_tracer_provider())}")
 
 # Initialize Flask app
 app = Flask(__name__)
 CORS(app)  # Enable CORS for frontend access
 
 # Service endpoints (use Docker service names for container networking)
+# Legacy DataPrime services (keep for compatibility)
 QUERY_SERVICE_URL = os.getenv("QUERY_SERVICE_URL", "http://query-service:8011")
 VALIDATION_SERVICE_URL = os.getenv("VALIDATION_SERVICE_URL", "http://validation-service:8012")
 QUEUE_WORKER_SERVICE_URL = os.getenv("QUEUE_WORKER_SERVICE_URL", "http://queue-worker-service:8017")
 STORAGE_SERVICE_URL = os.getenv("STORAGE_SERVICE_URL", "http://storage-service:8015")
+
+# E-commerce services
+RECOMMENDATION_AI_URL = os.getenv("RECOMMENDATION_AI_URL", "http://recommendation-ai:8011")
+PRODUCT_SERVICE_URL = os.getenv("PRODUCT_SERVICE_URL", "http://product-service:8014")
+ORDER_SERVICE_URL = os.getenv("ORDER_SERVICE_URL", "http://order-service:8016")
+INVENTORY_SERVICE_URL = os.getenv("INVENTORY_SERVICE_URL", "http://inventory-service:8015")
 
 # Gateway statistics with demo mode support
 gateway_stats = {
@@ -264,11 +275,178 @@ def health_check():
                 "status": "healthy",
                 "service": "api_gateway",
                 "telemetry_initialized": telemetry_enabled,
-                "version": "1.0.0",
+                "version": "2.0.0",
+                "mode": "ecommerce",
                 "timestamp": datetime.now().isoformat()
             }
             
             return jsonify(result)
+    finally:
+        if token:
+            context.detach(token)
+
+@app.route('/api/recommendations', methods=['POST'])
+def get_recommendations():
+    """
+    Get AI product recommendations.
+    
+    E-commerce endpoint that calls the Recommendation AI Service.
+    Creates a trace that flows through: Frontend → API Gateway → AI Service → OpenAI → Product Service → Database
+    """
+    print(f"\n🛍️ GET RECOMMENDATIONS - TRACE CONTEXT DEBUG")
+    token, is_root = extract_and_attach_trace_context()
+    
+    if is_root:
+        print(f"⚠️ WARNING: Creating ROOT span - trace propagation may have failed!")
+    else:
+        print(f"✅ SUCCESS: Creating CHILD span - trace propagation worked!")
+    
+    try:
+        gateway_stats["requests"] += 1
+        
+        # Choose span name based on context
+        span_name = "user_session.product_recommendations" if is_root else "api_gateway.get_recommendations"
+        
+        with tracer.start_as_current_span(span_name) as span:
+            try:
+                span.set_attribute("service.component", "api_gateway")
+                span.set_attribute("operation.name", "get_recommendations")
+                span.set_attribute("http.method", request.method)
+                span.set_attribute("http.route", "/api/recommendations")
+                
+                # Get request data
+                data = request.get_json()
+                if not data:
+                    gateway_stats["errors"] += 1
+                    span.set_status(trace.Status(trace.StatusCode.ERROR, "Missing request body"))
+                    return jsonify({"success": False, "error": "Missing request body"}), 400
+                
+                user_id = data.get('user_id', 'anonymous')
+                user_context = data.get('user_context', '')
+                
+                if not user_context:
+                    gateway_stats["errors"] += 1
+                    span.set_attribute("error", "Missing user_context")
+                    return jsonify({"success": False, "error": "Missing user_context"}), 400
+                
+                span.set_attribute("user.id", user_id)
+                span.set_attribute("user.context", user_context)
+                
+                # Call Recommendation AI Service
+                with tracer.start_as_current_span("api_gateway.call_recommendation_ai") as ai_span:
+                    ai_span.set_attribute("downstream.service", "recommendation_ai_service")
+                    
+                    headers = propagate_trace_context()
+                    
+                    print(f"🤖 Calling Recommendation AI Service for user: {user_id}")
+                    
+                    try:
+                        ai_response = requests.post(
+                            f"{RECOMMENDATION_AI_URL}/recommendations",
+                            json={
+                                "user_id": user_id,
+                                "user_context": user_context
+                            },
+                            headers=headers,
+                            timeout=45  # Increased for OpenAI + tool execution time
+                        )
+                        
+                        if ai_response.status_code != 200:
+                            raise Exception(f"AI service error: {ai_response.status_code} - {ai_response.text}")
+                        
+                        ai_result = ai_response.json()
+                        
+                        ai_span.set_attribute("ai.tool_call_attempted", ai_result.get("tool_call_attempted", False))
+                        ai_span.set_attribute("ai.tool_call_success", ai_result.get("tool_call_success", False))
+                        ai_span.set_attribute("ai.fallback_used", ai_result.get("ai_fallback_used", False))
+                        
+                        print(f"✅ AI Service responded - tool success: {ai_result.get('tool_call_success')}")
+                        
+                    except requests.Timeout:
+                        gateway_stats["errors"] += 1
+                        ai_span.set_attribute("error", "timeout")
+                        return jsonify({
+                            "success": False,
+                            "error": "AI service timeout",
+                            "service": "api_gateway"
+                        }), 504
+                    
+                    except Exception as e:
+                        gateway_stats["errors"] += 1
+                        ai_span.record_exception(e)
+                        raise
+                
+                # Prepare response
+                final_result = {
+                    "success": True,
+                    "recommendations": ai_result.get("recommendations", ""),
+                    "tool_call_success": ai_result.get("tool_call_success", False),
+                    "ai_fallback_used": ai_result.get("ai_fallback_used", False),
+                    "tool_call_details": ai_result.get("tool_call_details", []),
+                    "trace_id": ai_result.get("trace_id", format(span.get_span_context().trace_id, '032x')),
+                    "timestamp": datetime.now().isoformat()
+                }
+                
+                span.set_attribute("response.success", True)
+                span.set_attribute("response.tool_call_success", final_result["tool_call_success"])
+                
+                return jsonify(final_result)
+                
+            except Exception as e:
+                gateway_stats["errors"] += 1
+                try:
+                    span.record_exception(e)
+                    span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
+                except Exception:
+                    pass
+                raise
+            
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "service": "api_gateway"
+        }), 500
+    
+    finally:
+        if token:
+            context.detach(token)
+
+@app.route('/api/products', methods=['GET'])
+def proxy_products():
+    """
+    Proxy endpoint to Product Service.
+    
+    Query params:
+        category: Product category
+        price_min: Minimum price
+        price_max: Maximum price
+    """
+    token, is_root = extract_and_attach_trace_context()
+    
+    try:
+        with tracer.start_as_current_span("api_gateway.proxy_products") as span:
+            span.set_attribute("service.component", "api_gateway")
+            span.set_attribute("operation.name", "proxy_products")
+            
+            # Forward query parameters
+            category = request.args.get('category')
+            price_min = request.args.get('price_min')
+            price_max = request.args.get('price_max')
+            
+            headers = propagate_trace_context()
+            
+            product_response = requests.get(
+                f"{PRODUCT_SERVICE_URL}/products",
+                params={"category": category, "price_min": price_min, "price_max": price_max},
+                headers=headers,
+                timeout=10
+            )
+            
+            return jsonify(product_response.json()), product_response.status_code
+            
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
     finally:
         if token:
             context.detach(token)
@@ -921,6 +1099,221 @@ def demo_slow_database():
         }), 500
     finally:
         if 'token' in locals() and token:
+            context.detach(token)
+
+@app.route('/api/demo/inject-telemetry', methods=['POST'])
+def inject_database_telemetry():
+    """
+    Demo endpoint - returns success for UI button.
+    Note: Actual telemetry is generated by using the demo buttons to trigger real database calls.
+    """
+    try:
+        print("📊 Demo telemetry injection simulated...")
+        
+        return jsonify({
+            "success": True,
+            "message": "Demo telemetry simulation acknowledged",
+            "note": "Use 'Simulate Slow Database' and 'Simulate Pool Exhaustion' buttons to generate real telemetry",
+            "spans_created": 0,
+            "services": ["product-service", "order-service", "inventory-service"],
+            "check_coralogix": "APM → Database Monitoring → productcatalog",
+            "timestamp": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        print(f"❌ Telemetry injection failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "service": "api_gateway"
+        }), 500
+
+@app.route('/api/demo/trigger-database-scenario', methods=['POST'])
+def trigger_database_scenario():
+    """
+    Orchestrate Scene 9: Database APM demo scenario.
+    
+    Generates realistic load showing:
+    - 43 concurrent queries
+    - 2800ms P95 latency
+    - 95% connection pool utilization
+    - 8.3% failure rate
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import random
+    
+    token, is_root = extract_and_attach_trace_context()
+    
+    try:
+        span_name = "demo_session.database_exhaustion" if is_root else "api_gateway.trigger_database_scenario"
+        
+        with tracer.start_as_current_span(span_name) as span:
+            span.set_attribute("service.component", "api_gateway")
+            span.set_attribute("operation.name", "trigger_database_scenario")
+            span.set_attribute("demo.type", "database_exhaustion")
+            span.set_attribute("demo.concurrent_queries", 43)
+            span.set_attribute("demo.target_p95_ms", 2800)
+            span.set_attribute("demo.target_failure_rate", 8.3)
+            
+            print("🔥 Triggering Database Exhaustion Scenario (Scene 9)...")
+            
+            # Step 1: Enable slow queries on ALL THREE services
+            headers = propagate_trace_context()
+            services_to_configure = [
+                ("product-service", PRODUCT_SERVICE_URL, 2800),
+                ("order-service", ORDER_SERVICE_URL, 2900),
+                ("inventory-service", INVENTORY_SERVICE_URL, 2850)
+            ]
+            
+            slow_queries_enabled = 0
+            for service_name, service_url, delay_ms in services_to_configure:
+                try:
+                    slow_query_response = requests.post(
+                        f"{service_url}/demo/enable-slow-queries",
+                        json={"delay_ms": delay_ms},
+                        headers=headers,
+                        timeout=5
+                    )
+                    
+                    if slow_query_response.status_code == 200:
+                        slow_queries_enabled += 1
+                        print(f"✅ Slow queries enabled on {service_name} ({delay_ms}ms)")
+                    else:
+                        print(f"⚠️ Failed to enable slow queries on {service_name}: {slow_query_response.status_code}")
+                        
+                except Exception as e:
+                    print(f"⚠️ Error enabling slow queries on {service_name}: {e}")
+            
+            span.set_attribute("demo.slow_queries_enabled", slow_queries_enabled == 3)
+            span.set_attribute("demo.services_configured", slow_queries_enabled)
+            
+            # Step 2: Generate concurrent load across all 3 database services
+            # Distribution: product=15, order=15, inventory=13 (total 43)
+            
+            def call_product_service():
+                """Make a database query to product service."""
+                try:
+                    headers = propagate_trace_context()
+                    response = requests.get(
+                        f"{PRODUCT_SERVICE_URL}/products",
+                        params={"category": random.choice(["Wireless Headphones", "Smartphones", "Laptops"])},
+                        headers=headers,
+                        timeout=10
+                    )
+                    return {"service": "product", "status": response.status_code, "success": response.status_code == 200}
+                except Exception as e:
+                    return {"service": "product", "status": 0, "success": False, "error": str(e)}
+            
+            def call_order_service():
+                """Make a database query to order service."""
+                try:
+                    headers = propagate_trace_context()
+                    response = requests.get(
+                        f"{ORDER_SERVICE_URL}/orders/popular-products",
+                        headers=headers,
+                        timeout=10
+                    )
+                    return {"service": "order", "status": response.status_code, "success": response.status_code == 200}
+                except Exception as e:
+                    return {"service": "order", "status": 0, "success": False, "error": str(e)}
+            
+            def call_inventory_service():
+                """Make a database query to inventory service."""
+                try:
+                    headers = propagate_trace_context()
+                    product_id = random.randint(1, 20)
+                    response = requests.get(
+                        f"{INVENTORY_SERVICE_URL}/inventory/check/{product_id}",
+                        headers=headers,
+                        timeout=10
+                    )
+                    return {"service": "inventory", "status": response.status_code, "success": response.status_code == 200}
+                except Exception as e:
+                    return {"service": "inventory", "status": 0, "success": False, "error": str(e)}
+            
+            # Create task list
+            tasks = []
+            tasks.extend([call_product_service] * 15)  # 15 product service calls
+            tasks.extend([call_order_service] * 15)    # 15 order service calls
+            tasks.extend([call_inventory_service] * 13) # 13 inventory service calls
+            
+            print(f"📊 Spawning {len(tasks)} concurrent database queries...")
+            
+            start_time = time.time()
+            results = []
+            failures = 0
+            
+            # Execute all tasks concurrently
+            with ThreadPoolExecutor(max_workers=43) as executor:
+                futures = [executor.submit(task) for task in tasks]
+                
+                for future in as_completed(futures):
+                    try:
+                        result = future.result()
+                        results.append(result)
+                        if not result["success"]:
+                            failures += 1
+                    except Exception as e:
+                        results.append({"service": "unknown", "status": 0, "success": False, "error": str(e)})
+                        failures += 1
+            
+            duration_seconds = time.time() - start_time
+            failure_rate = (failures / len(results)) * 100 if results else 0
+            
+            span.set_attribute("demo.actual_queries", len(results))
+            span.set_attribute("demo.failures", failures)
+            span.set_attribute("demo.failure_rate_percent", round(failure_rate, 2))
+            span.set_attribute("demo.duration_seconds", round(duration_seconds, 2))
+            
+            print(f"✅ Database scenario completed:")
+            print(f"   - Total queries: {len(results)}")
+            print(f"   - Failures: {failures}")
+            print(f"   - Failure rate: {failure_rate:.2f}%")
+            print(f"   - Duration: {duration_seconds:.2f}s")
+            
+            # Add demo session attributes if this is a root span
+            if is_root:
+                span.set_attribute("demo.session_type", "database_exhaustion")
+                span.set_attribute("demo.initiated_by", "frontend_button")
+                span.set_attribute("demo.purpose", "coralogix_database_apm_demo")
+            
+            return jsonify({
+                "success": True,
+                "concurrent_queries": len(results),
+                "target_p95": 2800,
+                "target_p99": 3200,
+                "failures": failures,
+                "failure_rate_percent": round(failure_rate, 2),
+                "duration_seconds": round(duration_seconds, 2),
+                "service_distribution": {
+                    "product_service": 15,
+                    "order_service": 15,
+                    "inventory_service": 13
+                },
+                "expected_coralogix_metrics": {
+                    "query_duration_p95_ms": 2800,
+                    "query_duration_p99_ms": 3200,
+                    "active_queries": 43,
+                    "pool_utilization_percent": 95,
+                    "failure_rate_percent": 8.3
+                },
+                "message": "Database exhaustion scenario triggered. Check Coralogix Database APM.",
+                "timestamp": datetime.now().isoformat()
+            })
+            
+    except Exception as e:
+        print(f"❌ Database scenario failed: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "service": "api_gateway",
+            "timestamp": datetime.now().isoformat()
+        }), 500
+    
+    finally:
+        if token:
             context.detach(token)
 
 if __name__ == '__main__':

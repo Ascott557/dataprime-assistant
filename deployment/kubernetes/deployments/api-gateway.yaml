@@ -22,6 +22,7 @@ spec:
         - name: api-gateway
           image: dataprime-api-gateway:latest
           imagePullPolicy: Never  # Use local image built from Dockerfile
+          command: ["python", "services/api_gateway.py"]
           env:
             - name: HOST_IP
               valueFrom:
@@ -48,7 +49,10 @@ spec:
                   name: dataprime-config
                   key: CX_APPLICATION_NAME
             - name: CX_SUBSYSTEM_NAME
-              value: "api-gateway"
+              valueFrom:
+                configMapKeyRef:
+                  name: dataprime-config
+                  key: CX_SUBSYSTEM_NAME
             - name: REDIS_URL
               valueFrom:
                 configMapKeyRef:
@@ -65,6 +69,18 @@ spec:
               value: "api-gateway"
             - name: SERVICE_VERSION
               value: "1.0.0"
+            - name: OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT
+              value: "true"
+            - name: RECOMMENDATION_AI_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: dataprime-config
+                  key: RECOMMENDATION_AI_URL
+            - name: PRODUCT_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: dataprime-config
+                  key: PRODUCT_SERVICE_URL
           ports:
             - containerPort: 8010
               name: http
@@ -88,11 +104,4 @@ spec:
               port: 8010
             initialDelaySeconds: 20
             periodSeconds: 10
-          volumeMounts:
-            - name: sqlite-data
-              mountPath: /app/data
-      volumes:
-        - name: sqlite-data
-          persistentVolumeClaim:
-            claimName: sqlite-data
 

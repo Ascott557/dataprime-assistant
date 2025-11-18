@@ -5,7 +5,7 @@
 # This script verifies that all services are running correctly on the deployed
 # EC2 instance. It checks:
 # - EC2 instance status
-# - Docker containers
+# - Kubernetes pods
 # - Service health endpoints
 # - OTel Collector metrics
 #
@@ -27,7 +27,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 TERRAFORM_DIR="$PROJECT_ROOT/infrastructure/terraform"
 
 echo -e "${BLUE}=====================================================================${NC}"
-echo -e "${BLUE}DataPrime Demo - Health Check${NC}"
+echo -e "${BLUE}E-commerce Demo - Health Check${NC}"
 echo -e "${BLUE}=====================================================================${NC}"
 echo ""
 
@@ -103,28 +103,27 @@ else
 fi
 
 ###############################################################################
-# Check Docker Containers
+# Check Kubernetes Pods
 ###############################################################################
 echo ""
-echo -e "${YELLOW}[4/5] Checking Docker containers...${NC}"
+echo -e "${YELLOW}[4/5] Checking Kubernetes pods...${NC}"
 
-CONTAINER_STATUS=$(ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no ubuntu@"$PUBLIC_IP" \
-  "cd /opt/dataprime-assistant/deployment/docker && docker compose --env-file .env.vm -f docker-compose.vm.yml ps --format json 2>/dev/null" || echo "[]")
+POD_STATUS=$(ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no ubuntu@"$PUBLIC_IP" \
+  "kubectl get pods -n dataprime-demo -o json 2>/dev/null" || echo "{}")
 
-if [ "$CONTAINER_STATUS" = "[]" ]; then
-  echo -e "${YELLOW}⏱  Docker Compose not yet running (still bootstrapping)${NC}"
+if [ "$POD_STATUS" = "{}" ]; then
+  echo -e "${YELLOW}⏱  Kubernetes not yet ready (still bootstrapping)${NC}"
 else
-  # Count containers
-  TOTAL=$(echo "$CONTAINER_STATUS" | jq -s 'length')
-  RUNNING=$(echo "$CONTAINER_STATUS" | jq -s '[.[] | select(.State == "running")] | length')
+  TOTAL=$(echo "$POD_STATUS" | jq '.items | length')
+  RUNNING=$(echo "$POD_STATUS" | jq '[.items[] | select(.status.phase == "Running")] | length')
   
-  echo -e "${BLUE}  Total containers: $TOTAL${NC}"
+  echo -e "${BLUE}  Total pods: $TOTAL${NC}"
   echo -e "${BLUE}  Running: $RUNNING${NC}"
   
-  if [ "$RUNNING" -eq "$TOTAL" ]; then
-    echo -e "${GREEN}✓ All containers are running${NC}"
+  if [ "$RUNNING" -eq "$TOTAL" ] && [ "$TOTAL" -gt 0 ]; then
+    echo -e "${GREEN}✓ All pods are running${NC}"
   else
-    echo -e "${YELLOW}⚠  Some containers are not running yet${NC}"
+    echo -e "${YELLOW}⚠  Some pods are not running yet${NC}"
   fi
 fi
 
@@ -148,21 +147,20 @@ check_endpoint() {
 }
 
 HEALTHY=0
-TOTAL_CHECKS=3
+TOTAL_CHECKS=2
 
 echo ""
 echo -e "${BLUE}Testing endpoints:${NC}"
 
-check_endpoint "API Gateway       " "http://$PUBLIC_IP:8010/api/health" && ((HEALTHY++)) || true
-check_endpoint "Frontend (HTTP)   " "http://$PUBLIC_IP" && ((HEALTHY++)) || true
-check_endpoint "Frontend (HTTPS)  " "https://$PUBLIC_IP" --insecure && ((HEALTHY++)) || true
+check_endpoint "API Gateway (30010)" "http://$PUBLIC_IP:30010/api/health" && ((HEALTHY++)) || true
+check_endpoint "Frontend (30020)  " "http://$PUBLIC_IP:30020" && ((HEALTHY++)) || true
 
 echo ""
 if [ $HEALTHY -eq $TOTAL_CHECKS ]; then
   echo -e "${GREEN}✓ All health checks passed ($HEALTHY/$TOTAL_CHECKS)${NC}"
 else
   echo -e "${YELLOW}⚠  Some health checks failed ($HEALTHY/$TOTAL_CHECKS)${NC}"
-  echo -e "${YELLOW}  The application may still be starting up. Bootstrap takes 5-10 minutes.${NC}"
+  echo -e "${YELLOW}  The application may still be starting up. Bootstrap takes 10-15 minutes.${NC}"
 fi
 
 ###############################################################################
@@ -174,18 +172,15 @@ echo -e "${BLUE}Summary${NC}"
 echo -e "${BLUE}=====================================================================${NC}"
 echo ""
 echo -e "${BLUE}Access your application:${NC}"
-echo -e "  Frontend:   ${GREEN}https://$PUBLIC_IP${NC}"
-echo -e "  API:        ${GREEN}http://$PUBLIC_IP:8010${NC}"
+echo -e "  Frontend:   ${GREEN}http://$PUBLIC_IP:30020${NC}"
+echo -e "  API:        ${GREEN}http://$PUBLIC_IP:30010${NC}"
 echo ""
 echo -e "${BLUE}Monitor logs:${NC}"
-echo -e "  ${GREEN}ssh -i ~/.ssh/dataprime-demo-key.pem ubuntu@$PUBLIC_IP 'tail -f /var/log/dataprime-bootstrap.log'${NC}"
+echo -e "  ${GREEN}ssh -i ~/.ssh/dataprime-demo-key.pem ubuntu@$PUBLIC_IP 'tail -f /var/log/ecommerce-bootstrap.log'${NC}"
 echo ""
-echo -e "${BLUE}View Docker logs:${NC}"
-echo -e "  ${GREEN}ssh -i ~/.ssh/dataprime-demo-key.pem ubuntu@$PUBLIC_IP 'cd /opt/dataprime-assistant/deployment/docker && docker compose --env-file .env.vm -f docker-compose.vm.yml logs -f'${NC}"
+echo -e "${BLUE}View Kubernetes logs:${NC}"
+echo -e "  ${GREEN}kubectl logs -n dataprime-demo -l app=recommendation-ai --tail=50${NC}"
+echo -e "  ${GREEN}kubectl logs -n dataprime-demo -l app=product-service --tail=50${NC}"
+echo -e "  ${GREEN}kubectl logs -n dataprime-demo -l app.kubernetes.io/name=opentelemetry-collector --tail=50${NC}"
 echo ""
 echo -e "${BLUE}=====================================================================${NC}"
-
-
-
-
-

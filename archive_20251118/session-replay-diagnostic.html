@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Session Replay Diagnostic</title>
+    <script src="https://cdn.rum-ingress-coralogix.com/coralogix/browser/2.10.0/coralogix-browser-sdk.js"></script>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #1a1a1a; color: #0f0; }
+        .status { margin: 10px 0; padding: 10px; background: #000; border-left: 3px solid #0f0; }
+        .error { border-left-color: #f00; color: #f00; }
+        .warning { border-left-color: #ff0; color: #ff0; }
+        button { padding: 10px 20px; margin: 10px; cursor: pointer; }
+        h2 { color: #0ff; }
+    </style>
+</head>
+<body>
+    <h1>🔍 Session Replay Diagnostic Tool</h1>
+    
+    <div id="status"></div>
+    
+    <h2>Test Actions:</h2>
+    <button onclick="testClick()">Click Me!</button>
+    <button onclick="generateActivity()">Generate Activity</button>
+    <input type="text" placeholder="Type something" id="testInput">
+    
+    <h2>Manual Controls:</h2>
+    <button onclick="manualStart()">Start Recording</button>
+    <button onclick="manualStop()">Stop Recording</button>
+    <button onclick="checkStatus()">Check Status</button>
+    
+    <script>
+        const PUBLIC_KEY = 'cxtp_lYys51KLFaJ8elL3Ym1dOEcTIMwEwR';
+        const APP_NAME = 'ecomm_reccomendation';
+        
+        function log(message, type = 'status') {
+            const div = document.createElement('div');
+            div.className = type;
+            div.innerHTML = `[${new Date().toLocaleTimeString()}] ${message}`;
+            document.getElementById('status').appendChild(div);
+            console.log(message);
+        }
+        
+        // Initialize RUM with Session Replay
+        try {
+            window.CoralogixRum.init({
+                public_key: PUBLIC_KEY,
+                application: APP_NAME,
+                version: '1.0.0',
+                coralogixDomain: 'EU2',
+                sessionSampleRate: 100,
+                sessionRecordingConfig: {
+                    enable: true,
+                    autoStartSessionRecording: true,
+                    recordConsoleEvents: true,
+                    sessionRecordingSampleRate: 100,
+                    blockClass: 'rr-block',
+                    ignoreClass: 'rr-ignore',
+                    maskTextClass: 'rr-mask',
+                    maskAllInputs: false,
+                    maskInputOptions: { password: true }
+                }
+            });
+            
+            log('✅ RUM SDK initialized successfully', 'status');
+            
+            // Get session ID
+            const sessionId = window.CoralogixRum.getSessionId();
+            log(`✅ Session ID: ${sessionId}`, 'status');
+            
+            // Check if recording started
+            setTimeout(() => {
+                checkStatus();
+            }, 2000);
+            
+        } catch (error) {
+            log(`❌ Initialization error: ${error.message}`, 'error');
+        }
+        
+        function checkStatus() {
+            log('--- Checking Session Replay Status ---', 'status');
+            
+            // Check SDK loaded
+            if (typeof window.CoralogixRum === 'undefined') {
+                log('❌ RUM SDK not loaded!', 'error');
+                return;
+            } else {
+                log('✅ RUM SDK is loaded', 'status');
+            }
+            
+            // Check session ID
+            try {
+                const sessionId = window.CoralogixRum.getSessionId();
+                log(`✅ Session ID: ${sessionId}`, 'status');
+            } catch (e) {
+                log(`❌ Cannot get session ID: ${e.message}`, 'error');
+            }
+            
+            // Check for pako (compression library)
+            if (typeof window.pako !== 'undefined') {
+                log('✅ Pako compression library loaded', 'status');
+            } else {
+                log('⚠️ Pako compression library NOT found - Session Replay may not work!', 'warning');
+            }
+            
+            // Check network requests
+            const performanceEntries = performance.getEntriesByType('resource');
+            const rumRequests = performanceEntries.filter(e => 
+                e.name.includes('rum-ingress-coralogix')
+            );
+            
+            if (rumRequests.length > 0) {
+                log(`✅ Found ${rumRequests.length} RUM network requests`, 'status');
+                rumRequests.forEach(req => {
+                    if (req.name.includes('sessionrecording')) {
+                        log(`  ✅ Session recording request found: ${req.name}`, 'status');
+                    }
+                });
+            } else {
+                log('⚠️ No RUM network requests detected yet', 'warning');
+            }
+            
+            // Check config
+            if (window.CoralogixRum._config) {
+                const config = window.CoralogixRum._config;
+                log('Configuration:', 'status');
+                log(`  - Application: ${config.application}`, 'status');
+                log(`  - Version: ${config.version}`, 'status');
+                log(`  - Domain: ${config.coralogixDomain}`, 'status');
+                if (config.sessionRecordingConfig) {
+                    log(`  - Session Recording Enabled: ${config.sessionRecordingConfig.enable}`, 'status');
+                    log(`  - Auto Start: ${config.sessionRecordingConfig.autoStartSessionRecording}`, 'status');
+                } else {
+                    log('  ❌ No sessionRecordingConfig found!', 'error');
+                }
+            }
+        }
+        
+        function testClick() {
+            log('🖱️ Button clicked - this should be recorded!', 'status');
+        }
+        
+        function generateActivity() {
+            log('🎬 Generating test activity...', 'status');
+            
+            // Simulate user actions
+            for (let i = 0; i < 5; i++) {
+                setTimeout(() => {
+                    log(`Action ${i + 1}: Click simulated`, 'status');
+                    document.getElementById('testInput').value += `Test ${i} `;
+                }, i * 500);
+            }
+            
+            setTimeout(() => {
+                log('✅ Activity generation complete - check network tab!', 'status');
+            }, 3000);
+        }
+        
+        function manualStart() {
+            try {
+                window.CoralogixRum.startSessionRecording();
+                log('✅ Manually started session recording', 'status');
+            } catch (e) {
+                log(`❌ Failed to start recording: ${e.message}`, 'error');
+            }
+        }
+        
+        function manualStop() {
+            try {
+                window.CoralogixRum.stopSessionRecording();
+                log('⏹️ Stopped session recording', 'status');
+            } catch (e) {
+                log(`❌ Failed to stop recording: ${e.message}`, 'error');
+            }
+        }
+        
+        // Monitor network requests
+        const originalFetch = window.fetch;
+        window.fetch = function(...args) {
+            const url = args[0];
+            if (url.includes('sessionrecording')) {
+                log(`📡 Session recording request sent to: ${url}`, 'status');
+            }
+            return originalFetch.apply(this, args);
+        };
+    </script>
+</body>
+</html>

@@ -23,7 +23,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 TERRAFORM_DIR="$PROJECT_ROOT/infrastructure/terraform"
 
 echo -e "${RED}=====================================================================${NC}"
-echo -e "${RED}DataPrime Demo - Teardown${NC}"
+echo -e "${RED}E-commerce Demo - Teardown${NC}"
 echo -e "${RED}=====================================================================${NC}"
 echo ""
 
@@ -37,6 +37,7 @@ echo -e "  • EC2 instance and Elastic IP"
 echo -e "  • EBS volumes (all data will be lost)"
 echo -e "  • Security groups and IAM roles"
 echo -e "  • VPC and networking components"
+echo -e "  • K3s cluster and all applications"
 echo ""
 
 read -p "Are you sure you want to destroy everything? (yes/no): " CONFIRM1
@@ -59,7 +60,7 @@ fi
 # Navigate to Terraform Directory
 ###############################################################################
 echo ""
-echo -e "${YELLOW}[1/4] Navigating to Terraform directory...${NC}"
+echo -e "${YELLOW}[1/6] Navigating to Terraform directory...${NC}"
 
 cd "$TERRAFORM_DIR"
 
@@ -74,19 +75,44 @@ echo -e "${GREEN}✓ Terraform state found${NC}"
 # Get Instance Information (before destruction)
 ###############################################################################
 echo ""
-echo -e "${YELLOW}[2/4] Retrieving instance information...${NC}"
+echo -e "${YELLOW}[2/6] Retrieving instance information...${NC}"
 
 PUBLIC_IP=$(terraform output -raw instance_public_ip 2>/dev/null || echo "N/A")
 INSTANCE_ID=$(terraform output -raw instance_id 2>/dev/null || echo "N/A")
+SSH_KEY="$HOME/.ssh/dataprime-demo-key.pem"
 
 echo -e "${BLUE}  Instance ID: $INSTANCE_ID${NC}"
 echo -e "${BLUE}  Public IP: $PUBLIC_IP${NC}"
 
 ###############################################################################
+# Cleanup K3s Resources
+###############################################################################
+echo ""
+echo -e "${YELLOW}[3/6] Cleaning up Kubernetes resources...${NC}"
+
+if [ "$PUBLIC_IP" != "N/A" ] && [ -f "$SSH_KEY" ]; then
+  echo -e "${BLUE}Attempting to cleanup K3s resources...${NC}"
+  
+  ssh -i "$SSH_KEY" -o ConnectTimeout=10 -o StrictHostKeyChecking=no ubuntu@"$PUBLIC_IP" bash <<'REMOTE_CLEANUP' || true
+    # Uninstall Helm releases
+    helm uninstall coralogix-otel -n dataprime-demo 2>/dev/null || true
+    
+    # Delete namespace (cascades to all resources)
+    kubectl delete namespace dataprime-demo --timeout=120s 2>/dev/null || true
+    
+    echo "✓ Kubernetes resources cleaned up"
+REMOTE_CLEANUP
+  
+  echo -e "${GREEN}✓ K3s resources cleaned up${NC}"
+else
+  echo -e "${YELLOW}⚠  Skipping K3s cleanup (instance not accessible)${NC}"
+fi
+
+###############################################################################
 # Terraform Destroy
 ###############################################################################
 echo ""
-echo -e "${YELLOW}[3/4] Destroying infrastructure...${NC}"
+echo -e "${YELLOW}[4/6] Destroying infrastructure...${NC}"
 echo -e "${BLUE}This will take 2-3 minutes...${NC}"
 echo ""
 
@@ -98,10 +124,9 @@ echo -e "${GREEN}✓ Infrastructure destroyed${NC}"
 # Cleanup Local Files
 ###############################################################################
 echo ""
-echo -e "${YELLOW}[4/4] Cleaning up local files...${NC}"
+echo -e "${YELLOW}[5/6] Cleaning up local files...${NC}"
 
 # Remove SSH key
-SSH_KEY="$HOME/.ssh/dataprime-demo-key.pem"
 if [ -f "$SSH_KEY" ]; then
   rm "$SSH_KEY"
   echo -e "${GREEN}✓ Removed SSH key: $SSH_KEY${NC}"
@@ -115,6 +140,8 @@ fi
 ###############################################################################
 # Summary
 ###############################################################################
+echo ""
+echo -e "${YELLOW}[6/6] Teardown complete${NC}"
 echo ""
 echo -e "${GREEN}=====================================================================${NC}"
 echo -e "${GREEN}✅ Teardown Complete${NC}"
@@ -131,8 +158,3 @@ echo -e "  cd infrastructure/terraform/backend-setup"
 echo -e "  terraform destroy"
 echo ""
 echo -e "${GREEN}=====================================================================${NC}"
-
-
-
-
-
