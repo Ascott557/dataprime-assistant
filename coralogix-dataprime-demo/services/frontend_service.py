@@ -145,7 +145,7 @@ def browse_products():
                     
                     products_response = requests.get(
                         f"{PRODUCT_CATALOG_URL}/products",
-                        params={"category": "electronics", "traffic_type": "baseline"},
+                        params={"category": "electronics", "price_min": 0, "price_max": 1000, "traffic_type": "baseline"},
                         headers=headers,
                         timeout=3
                     )
