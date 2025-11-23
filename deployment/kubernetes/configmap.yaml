@@ -13,7 +13,7 @@ data:
   CX_SUBSYSTEM_NAME: "ecommerce-services"
   
   # OpenTelemetry Configuration  
-  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector.ecommerce-demo.svc.cluster.local:4317"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://coralogix-opentelemetry-collector:4317"
   
   # PostgreSQL Database Configuration
   POSTGRES_HOST: "postgresql-primary"
