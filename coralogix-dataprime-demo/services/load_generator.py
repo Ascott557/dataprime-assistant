@@ -11,6 +11,8 @@ import sys
 import time
 import random
 import requests
+import asyncio
+import aiohttp
 from datetime import datetime
 from threading import Lock, Thread
 from flask import Flask, request, jsonify
@@ -23,6 +25,7 @@ import structlog
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.shared_telemetry import ensure_telemetry_initialized, get_telemetry_status
+from app.shared_span_attributes import calculate_demo_minute, is_demo_mode
 
 # Configure structured logging
 structlog.configure(
@@ -98,6 +101,130 @@ def propagate_trace_context(headers=None):
         print("⚠️ No current span found for propagation")
     
     return headers
+
+
+class DualModeLoadGenerator:
+    """
+    Generates both baseline and demo traffic simultaneously.
+    
+    Baseline: 100 rpm to /products (fast, indexed) - always healthy
+    Demo: 800→4200 rpm to /products/recommendations (slow, unindexed) - progressive failures
+    """
+    
+    def __init__(self):
+        self.baseline_rpm = 100
+        self.demo_base_rpm = 800
+        self.demo_peak_rpm = 4200
+        self.baseline_stats = {"requests": 0, "errors": 0}
+        self.demo_stats = {"requests": 0, "errors": 0}
+    
+    def calculate_demo_rpm(self, demo_minute):
+        """Calculate current demo RPM based on elapsed minutes."""
+        if demo_minute < 0:
+            return 0
+        elif demo_minute < 10:
+            # Ramp up: 800 → 3400 rpm over 10 minutes
+            return int(800 + (demo_minute * 260))
+        elif demo_minute < 25:
+            # Peak: 4200 rpm sustained
+            return 4200
+        else:
+            # Wind down: 4200 → 1000 rpm
+            return max(1000, int(4200 - ((demo_minute - 25) * 640)))
+    
+    async def generate_baseline_traffic(self):
+        """Continuous 100 rpm to /products endpoint - always healthy."""
+        async with aiohttp.ClientSession() as session:
+            while True:
+                with tracer.start_as_current_span("baseline_request") as span:
+                    span.set_attribute("traffic.type", "baseline")
+                    span.set_attribute("traffic.category", "control")
+                    
+                    headers = propagate_trace_context()
+                    
+                    try:
+                        async with session.get(
+                            f"{PRODUCT_CATALOG_URL}/products",
+                            params={"category": "electronics"},
+                            headers=headers,
+                            timeout=aiohttp.ClientTimeout(total=2)
+                        ) as response:
+                            span.set_attribute("http.status_code", response.status)
+                            self.baseline_stats["requests"] += 1
+                            
+                            if response.status >= 500:
+                                span.set_status(Status(StatusCode.ERROR))
+                                self.baseline_stats["errors"] += 1
+                            else:
+                                span.set_status(Status(StatusCode.OK))
+                    
+                    except Exception as e:
+                        logger.error("baseline_traffic_failure", error=str(e))
+                        span.set_status(Status(StatusCode.ERROR))
+                        self.baseline_stats["errors"] += 1
+                
+                await asyncio.sleep(0.6)  # 100 rpm = 0.6s delay
+    
+    async def generate_demo_traffic(self):
+        """Progressive 800→4200 rpm to /products/recommendations - experiences failures."""
+        async with aiohttp.ClientSession() as session:
+            while True:
+                if not is_demo_mode():
+                    await asyncio.sleep(10)
+                    continue
+                
+                demo_minute = calculate_demo_minute()
+                current_rpm = self.calculate_demo_rpm(demo_minute)
+                
+                if current_rpm == 0:
+                    await asyncio.sleep(1)
+                    continue
+                
+                with tracer.start_as_current_span("demo_request") as span:
+                    span.set_attribute("traffic.type", "demo")
+                    span.set_attribute("traffic.category", "blackfriday")
+                    span.set_attribute("demo_minute", demo_minute)
+                    
+                    headers = propagate_trace_context()
+                    
+                    try:
+                        async with session.get(
+                            f"{PRODUCT_CATALOG_URL}/products/recommendations",
+                            params={
+                                "category": "electronics",
+                                "user_id": f"user-{random.randint(1000, 9999)}"
+                            },
+                            headers=headers,
+                            timeout=aiohttp.ClientTimeout(total=6)
+                        ) as response:
+                            span.set_attribute("http.status_code", response.status)
+                            self.demo_stats["requests"] += 1
+                            
+                            if response.status >= 500:
+                                span.set_status(Status(StatusCode.ERROR))
+                                self.demo_stats["errors"] += 1
+                            else:
+                                span.set_status(Status(StatusCode.OK))
+                    
+                    except asyncio.TimeoutError:
+                        span.set_attribute("error.type", "timeout")
+                        span.set_status(Status(StatusCode.ERROR))
+                        self.demo_stats["errors"] += 1
+                    
+                    except Exception as e:
+                        span.set_attribute("error.type", type(e).__name__)
+                        span.set_status(Status(StatusCode.ERROR))
+                        self.demo_stats["errors"] += 1
+                
+                # Calculate delay based on current RPM
+                rps = current_rpm / 60.0
+                delay = 1.0 / rps
+                await asyncio.sleep(delay)
+
+
+# Global generator instance
+_dual_mode_generator = None
+
 
 @app.route('/health', methods=['GET'])
 def health():
@@ -484,9 +611,75 @@ def stop_demo():
         }), 200
 
 
+@app.route('/admin/traffic-stats', methods=['GET'])
+def traffic_stats():
+    """Get current traffic statistics for both baseline and demo modes."""
+    global _dual_mode_generator
+    
+    demo_minute = calculate_demo_minute()
+    current_demo_rpm = 0
+    
+    if _dual_mode_generator:
+        current_demo_rpm = _dual_mode_generator.calculate_demo_rpm(demo_minute)
+        baseline_stats = _dual_mode_generator.baseline_stats
+        demo_stats = _dual_mode_generator.demo_stats
+    else:
+        baseline_stats = {"requests": 0, "errors": 0}
+        demo_stats = {"requests": 0, "errors": 0}
+    
+    baseline_error_rate = (baseline_stats['errors'] / max(1, baseline_stats['requests'])) * 100
+    demo_error_rate = (demo_stats['errors'] / max(1, demo_stats['requests'])) * 100
+    
+    return jsonify({
+        "baseline": {
+            "rpm": 100,
+            "requests": baseline_stats["requests"],
+            "errors": baseline_stats["errors"],
+            "error_rate": f"{baseline_error_rate:.1f}%"
+        },
+        "demo": {
+            "current_rpm": current_demo_rpm if is_demo_mode() else 0,
+            "demo_minute": demo_minute,
+            "requests": demo_stats["requests"],
+            "errors": demo_stats["errors"],
+            "error_rate": f"{demo_error_rate:.1f}%"
+        }
+    })
+
+
+def start_dual_mode_on_startup():
+    """Start dual-mode traffic automatically when service starts."""
+    global _dual_mode_generator
+    _dual_mode_generator = DualModeLoadGenerator()
+    
+    def run_async():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        baseline_task = loop.create_task(_dual_mode_generator.generate_baseline_traffic())
+        demo_task = loop.create_task(_dual_mode_generator.generate_demo_traffic())
+        
+        loop.run_until_complete(asyncio.gather(baseline_task, demo_task))
+    
+    thread = Thread(target=run_async, daemon=True)
+    thread.start()
+    
+    logger.info("dual_mode_traffic_started", 
+                baseline_rpm=100, 
+                demo_base_rpm=800,
+                demo_peak_rpm=4200)
+    print("🚀 Dual-mode traffic generator started")
+    print("   Baseline: 100 rpm → /products (always healthy)")
+    print("   Demo: 800-4200 rpm → /products/recommendations (progressive failures)")
+
+
 if __name__ == '__main__':
     print("🚀 Load Generator starting on port 8010...")
     print(f"   Telemetry initialized: {telemetry_enabled}")
     print(f"   Demo mode: {load_stats['demo_mode']}")
+    
+    # Start dual-mode traffic automatically
+    start_dual_mode_on_startup()
+    
     app.run(host='0.0.0.0', port=8010, debug=False)
 

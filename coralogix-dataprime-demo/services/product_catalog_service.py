@@ -205,16 +205,30 @@ def get_progressive_delay():
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    """Health check endpoint with pool status."""
+    """Health check endpoint with pool status and dual-mode information."""
     pool_stats = get_pool_stats()
     
     return jsonify({
         "status": "healthy",
-        "service": "product_service",
+        "service": "product_catalog",
+        "endpoints": {
+            "baseline": {
+                "path": "/products",
+                "description": "Fast, indexed queries",
+                "traffic_type": "baseline"
+            },
+            "demo": {
+                "path": "/products/recommendations",
+                "description": "Slow, unindexed queries",
+                "traffic_type": "demo"
+            }
+        },
         "database": {
             "connected": True,
             "pool_stats": pool_stats
         },
+        "demo_mode": is_demo_mode(),
+        "demo_minute": calculate_demo_minute() if is_demo_mode() else None,
         "timestamp": datetime.now().isoformat()
     })
 
@@ -236,6 +250,11 @@ def get_products():
     token, is_root = extract_and_attach_trace_context()
     
     with tracer.start_as_current_span("get_products_from_db") as span:
+        # Add baseline traffic attributes for dual-mode demo
+        span.set_attribute("traffic.type", "baseline")
+        span.set_attribute("endpoint.type", "fast_indexed")
+        span.set_attribute("db.index_used", "idx_products_category_active")
+        
         # Increment active queries counter
         with active_queries_lock:
             active_queries_count += 1
@@ -412,6 +431,174 @@ def get_products():
             # Detach trace context
             if token:
                 context.detach(token)
+
+
+@app.route('/products/recommendations', methods=['GET'])
+def get_product_recommendations():
+    """
+    DEMO ENDPOINT - Slow unindexed query for Black Friday V4 demo.
+    
+    This endpoint simulates a product recommendation feature with missing indexes,
+    causing progressive failures: 0% → 78% error rate over 30 minutes.
+    Used by dual-mode traffic to demonstrate failure isolation.
+    
+    Query params:
+        category: Product category (default: 'electronics')
+        user_id: User identifier for personalization
+    """
+    global active_queries_count
+    
+    token, is_root = extract_and_attach_trace_context()
+    
+    try:
+        with tracer.start_as_current_span("get_recommendations") as span:
+            # Demo traffic attributes
+            span.set_attribute("traffic.type", "demo")
+            span.set_attribute("endpoint.type", "slow_unindexed")
+            span.set_attribute("db.index_used", "NONE")
+            
+            # Increment active queries
+            with active_queries_lock:
+                active_queries_count += 1
+                db_active_queries_gauge.add(1)
+            
+            category = request.args.get('category', 'electronics')
+            user_id = request.args.get('user_id', 'anonymous')
+            demo_minute = calculate_demo_minute()
+            phase = get_demo_phase(demo_minute)
+            
+            span.set_attribute("query.category", category)
+            span.set_attribute("query.user_id", user_id)
+            span.set_attribute("demo.minute", demo_minute)
+            span.set_attribute("demo.phase", phase)
+            
+            # Progressive delays and failure rates by phase
+            if not is_demo_mode() or demo_minute < 10:
+                delay_ms = random.uniform(100, 300)
+                failure_rate = 0.02
+            elif demo_minute < 15:
+                delay_ms = random.uniform(500, 1200)
+                failure_rate = 0.15
+            elif demo_minute < 20:
+                delay_ms = random.uniform(1200, 2000)
+                failure_rate = 0.45
+            else:
+                delay_ms = random.uniform(2000, 2800)
+                failure_rate = 0.78
+            
+            conn = None
+            
+            try:
+                conn = get_connection()
+                cursor = conn.cursor()
+                
+                # Create database span with semantic conventions
+                with tracer.start_as_current_span(
+                    f"SELECT {db_name}.products",
+                    kind=SpanKind.CLIENT
+                ) as db_span:
+                    db_span.set_attribute("db.system", "postgresql")
+                    db_span.set_attribute("db.name", db_name)
+                    db_span.set_attribute("db.operation", "SELECT")
+                    db_span.set_attribute("db.sql.table", "products")
+                    db_span.set_attribute("db.statement",
+                        "SELECT * FROM products WHERE category = %s AND active = true "
+                        "AND price BETWEEN %s AND %s ORDER BY popularity DESC LIMIT 10")
+                    db_span.set_attribute("net.peer.name", os.getenv("DB_HOST", "postgres"))
+                    db_span.set_attribute("net.peer.port", 5432)
+                    
+                    # Simulate connection pool wait + query execution
+                    connection_wait_ms = delay_ms * 0.66
+                    execution_ms = delay_ms * 0.34
+                    
+                    db_span.add_event("connection_pool_wait", 
+                                     attributes={"wait_time_ms": connection_wait_ms})
+                    
+                    time.sleep(connection_wait_ms / 1000.0)
+                    time.sleep(execution_ms / 1000.0)
+                    
+                    # Set slow query attributes if > 1000ms
+                    if delay_ms > 1000:
+                        DemoSpanAttributes.set_slow_query(
+                            span=db_span,
+                            duration_ms=int(delay_ms),
+                            missing_index="idx_products_category",
+                            rows_scanned=487342
+                        )
+                        
+                        logger.warning("demo_slow_query_triggered",
+                                     duration_ms=delay_ms,
+                                     demo_minute=demo_minute,
+                                     phase=phase,
+                                     traffic_type="demo",
+                                     category=category)
+                    
+                    # Determine if should fail based on failure rate
+                    should_fail = random.random() < failure_rate
+                    
+                    if should_fail:
+                        db_span.set_status(Status(StatusCode.ERROR))
+                        span.set_status(Status(StatusCode.ERROR))
+                        
+                        logger.error("demo_query_timeout",
+                                   duration_ms=delay_ms,
+                                   demo_minute=demo_minute,
+                                   failure_rate=f"{failure_rate*100:.1f}%",
+                                   traffic_type="demo",
+                                   category=category)
+                        
+                        cursor.close()
+                        
+                        with active_queries_lock:
+                            active_queries_count -= 1
+                            db_active_queries_gauge.add(-1)
+                        
+                        if conn:
+                            return_connection(conn)
+                        
+                        raise Exception("Query timeout - connection pool exhausted")
+                    
+                    # Success path - execute actual query
+                    cursor.execute(
+                        "SELECT * FROM products WHERE category = %s LIMIT 10",
+                        (category,)
+                    )
+                    results = cursor.fetchall()
+                    db_span.set_attribute("db.rows_returned", len(results))
+                
+                cursor.close()
+                
+                # Convert results to dict
+                products = []
+                for row in results:
+                    products.append({
+                        "id": row[0],
+                        "name": row[1],
+                        "category": row[2],
+                        "price": float(row[3]) if row[3] else 0.0,
+                        "stock_quantity": row[4]
+                    })
+                
+                span.set_status(Status(StatusCode.OK))
+                return jsonify({"products": products}), 200
+            
+            finally:
+                with active_queries_lock:
+                    active_queries_count -= 1
+                    db_active_queries_gauge.add(-1)
+                
+                if conn:
+                    return_connection(conn)
+    
+    except Exception as e:
+        span.set_status(Status(StatusCode.ERROR))
+        span.record_exception(e)
+        logger.error("recommendation_endpoint_error", error=str(e))
+        return jsonify({"error": "Service unavailable"}), 503
+    
+    finally:
+        if token:
+            context.detach(token)
 
 
 @app.route('/products/search', methods=['GET'])
