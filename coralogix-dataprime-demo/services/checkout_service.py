@@ -11,8 +11,6 @@ import os
 import sys
 import time
 import random
-import uuid
-import requests
 from datetime import datetime
 from flask import Flask, request, jsonify
 from opentelemetry import trace, context
@@ -515,59 +513,6 @@ def create_order():
             main_span.set_attribute("db.connection_pool.active", pool_stats["active_connections"])
             main_span.set_attribute("db.connection_pool.max", pool_stats["max_connections"])
             main_span.set_attribute("db.connection_pool.utilization_percent", pool_stats["utilization_percent"])
-            
-            # Generate order_id and calculate cart_total for recommendation call
-            order_id = f"order-{uuid.uuid4()}"
-            cart_total = quantity * 99.99  # Use estimated total
-            
-            # Call product recommendations during demo (BLOCKS checkout on failure)
-            demo_minute = calculate_demo_minute()
-            
-            if is_demo_mode() and demo_minute >= 1:
-                with tracer.start_as_current_span("call_product_recommendations") as rec_span:
-                    rec_span.set_attribute("peer.service", "product-catalog")
-                    rec_span.set_attribute("traffic.type", "demo")
-                    
-                    # Propagate trace context
-                    propagator = TraceContextTextMapPropagator()
-                    headers = {}
-                    propagator.inject(headers)
-                    
-                    try:
-                        rec_response = requests.get(
-                            f"{os.getenv('PRODUCT_CATALOG_URL', 'http://product-catalog:8014')}/products/recommendations",
-                            params={"category": "electronics", "user_id": user_id},
-                            headers=headers,
-                            timeout=5
-                        )
-                        
-                        if rec_response.status_code >= 500:
-                            rec_span.set_status(Status(StatusCode.ERROR))
-                            raise Exception("Product recommendations service error")
-                    
-                    except (requests.exceptions.Timeout, requests.exceptions.RequestException) as e:
-                        rec_span.set_status(Status(StatusCode.ERROR))
-                        rec_span.set_attribute("error.type", "timeout")
-                        
-                        # Checkout FAILS when recommendations timeout
-                        main_span.set_status(Status(StatusCode.ERROR))
-                        DemoSpanAttributes.set_checkout_failed(
-                            span=main_span,
-                            order_id=order_id,
-                            user_id=user_id,
-                            total=cart_total,
-                            failure_reason="product-recommendations-timeout"
-                        )
-                        
-                        logger.error("checkout_failed_recommendations_timeout",
-                                   order_id=order_id,
-                                   user_id=user_id,
-                                   demo_minute=demo_minute)
-                        
-                        order_stats["errors"] += 1
-                        return jsonify({
-                            "error": "Checkout failed: Product recommendations unavailable"
-                        }), 503
             
             # Manual database query span with SpanKind.CLIENT for Coralogix DB Monitoring
             db_name = os.getenv("DB_NAME", "productcatalog")

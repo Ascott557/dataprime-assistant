@@ -42,17 +42,5 @@ data:
   # Demo Mode
   DEMO_MODE: "normal"
   
-  # Baseline Traffic Configuration
-  BASELINE_ENABLED: "true"
-  BASELINE_RPM: "100"
-  BASELINE_ENDPOINT: "/products"
-  
-  # Demo Traffic Configuration
-  DEMO_ENDPOINT: "/products/recommendations"
-  DEMO_BASE_RPM: "800"
-  DEMO_PEAK_RPM: "4200"
-  DEMO_START_TIMESTAMP: ""
-  DEMO_DURATION_MINUTES: "30"
-  
   # Environment
   ENVIRONMENT: "production"
