@@ -15,7 +15,28 @@ from opentelemetry.trace import SpanKind, Status, StatusCode
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.shared_telemetry import ensure_telemetry_initialized
-from app.shared_span_attributes import extract_and_attach_trace_context
+
+def extract_and_attach_trace_context():
+    """Extract trace context from incoming request."""
+    try:
+        from flask import request
+        from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+        headers = dict(request.headers)
+        propagator = TraceContextTextMapPropagator()
+        incoming_context = propagator.extract(headers)
+        
+        if incoming_context:
+            token = context.attach(incoming_context)
+            current_span = trace.get_current_span()
+            if current_span and current_span.is_recording():
+                return token, False
+            else:
+                context.detach(token)
+        
+        return None, True
+    except Exception as e:
+        print(f"⚠️ Trace context extraction failed: {e}")
+        return None, True
 
 # Initialize telemetry
 telemetry_enabled = ensure_telemetry_initialized()
