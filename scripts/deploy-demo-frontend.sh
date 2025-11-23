@@ -60,3 +60,4 @@ echo "  4. Show trace ID for verification in Coralogix"
 echo ""
 echo "======================================================================"
 
+

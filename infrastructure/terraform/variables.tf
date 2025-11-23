@@ -9,9 +9,10 @@ variable "coralogix_token" {
 }
 
 variable "openai_api_key" {
-  description = "OpenAI API key for query generation"
+  description = "OpenAI API key (not used in e-commerce platform)"
   type        = string
   sensitive   = true
+  default     = "not-used"
 }
 
 variable "allowed_ssh_cidr" {
@@ -37,7 +38,7 @@ variable "aws_region" {
 variable "project_name" {
   description = "Project name for resource naming"
   type        = string
-  default     = "dataprime-demo"
+  default     = "ecommerce-platform"
 }
 
 variable "environment" {
@@ -95,19 +96,19 @@ variable "public_subnet_cidr" {
 variable "coralogix_domain" {
   description = "Coralogix domain or ingress endpoint (e.g., coralogix.com, ingress.eu2.coralogix.com:443)"
   type        = string
-  default     = "coralogix.com"
+  default     = "eu2.coralogix.com"
 }
 
 variable "coralogix_app_name" {
   description = "Coralogix application name"
   type        = string
-  default     = "dataprime-demo"
+  default     = "ecommerce-platform"
 }
 
 variable "coralogix_subsystem" {
   description = "Coralogix subsystem name"
   type        = string
-  default     = "vm-deployment"
+  default     = "ecommerce-services"
 }
 
 variable "coralogix_company_id" {

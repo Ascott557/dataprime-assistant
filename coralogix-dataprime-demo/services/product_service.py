@@ -693,6 +693,201 @@ def demo_enable_pool_exhaustion():
     return simulate_pool_exhaustion()
 
 
+@app.route('/products/popular-with-history', methods=['GET'])
+def get_popular_products_with_history():
+    """
+    Complex JOIN query: Get popular products with order history.
+    
+    This endpoint demonstrates:
+    - Complex JOIN operations (products + orders)
+    - Aggregation queries
+    - Slow query simulation (>3000ms when enabled)
+    - Perfect for Database APM failure demos
+    
+    Query params:
+        limit: Number of products to return (default: 10)
+    """
+    global active_queries_count
+    
+    # CRITICAL: Extract and attach trace context from incoming request
+    token, is_root = extract_and_attach_trace_context()
+    
+    with tracer.start_as_current_span("get_popular_products_with_history") as span:
+        # Increment active queries counter
+        with active_queries_lock:
+            active_queries_count += 1
+            db_active_queries_gauge.add(1)
+        
+        span.set_attribute("db.system", "postgresql")
+        span.set_attribute("db.active_queries", active_queries_count)
+        span.set_attribute("query.type", "JOIN")
+        span.set_attribute("query.complexity", "high")
+        
+        # Get query parameters
+        limit = request.args.get('limit', default=10, type=int)
+        span.set_attribute("query.limit", limit)
+        
+        query_start = time.time()
+        conn = None
+        
+        try:
+            # Get connection from pool
+            conn = get_connection()
+            
+            # Track pool metrics
+            pool = get_db_pool()
+            pool_stats = get_pool_stats()
+            pool_active = pool_stats["active_connections"]
+            pool_max = pool_stats["max_connections"]
+            utilization = pool_stats["utilization_percent"]
+            
+            db_pool_active_gauge.add(1)
+            db_pool_utilization_histogram.record(utilization, {
+                "pool": "product_db"
+            })
+            
+            span.set_attribute("db.connection_pool.active", pool_active)
+            span.set_attribute("db.connection_pool.max", pool_max)
+            span.set_attribute("db.connection_pool.utilization_percent", utilization)
+            
+            # Simulate slow queries for demo (>3000ms)
+            if SIMULATE_SLOW_QUERIES:
+                time.sleep(QUERY_DELAY_MS / 1000.0)
+                span.set_attribute("db.simulation.slow_query_enabled", True)
+                span.set_attribute("db.simulation.delay_ms", QUERY_DELAY_MS)
+            
+            # Execute complex JOIN query with explicit database span
+            # CRITICAL: Use SpanKind.CLIENT and proper naming for Coralogix Database Monitoring
+            db_name = os.getenv("DB_NAME", "productcatalog")
+            with tracer.start_as_current_span(
+                f"JOIN {db_name}.products+orders",  # OTel convention for JOIN
+                kind=SpanKind.CLIENT  # REQUIRED for Coralogix Database Monitoring
+            ) as db_span:
+                # Set REQUIRED OpenTelemetry database semantic conventions
+                db_span.set_attribute("db.system", "postgresql")
+                db_span.set_attribute("db.name", db_name)
+                db_span.set_attribute("db.operation", "JOIN")
+                db_span.set_attribute("db.sql.table", "products,orders")  # Multiple tables
+                db_span.set_attribute("db.statement", """
+                    SELECT 
+                        p.id, p.name, p.category, p.price, p.description,
+                        COUNT(o.id) as total_orders,
+                        SUM(o.quantity) as total_quantity_sold,
+                        MAX(o.order_date) as last_order_date
+                    FROM products p
+                    LEFT JOIN orders o ON p.id = o.product_id
+                    GROUP BY p.id, p.name, p.category, p.price, p.description
+                    ORDER BY total_orders DESC
+                    LIMIT %s
+                """)
+                db_span.set_attribute("net.peer.name", os.getenv("DB_HOST", "postgres"))
+                db_span.set_attribute("net.peer.port", int(os.getenv("DB_PORT", "5432")))
+                db_span.set_attribute("db.user", os.getenv("DB_USER", "dbadmin"))
+                db_span.set_attribute("db.query.type", "JOIN")
+                db_span.set_attribute("db.query.tables", "products+orders")
+                
+                # Add database operation event
+                db_span.add_event("Starting PostgreSQL JOIN operation", {
+                    "tables": "products, orders",
+                    "operation": "JOIN + GROUP BY",
+                    "aggregations": "COUNT, SUM, MAX"
+                })
+                
+                cursor = conn.cursor()
+                query = """
+                    SELECT 
+                        p.id, p.name, p.category, p.price, p.description,
+                        p.image_url, p.stock_quantity,
+                        COUNT(o.id) as total_orders,
+                        COALESCE(SUM(o.quantity), 0) as total_quantity_sold,
+                        MAX(o.order_date) as last_order_date
+                    FROM products p
+                    LEFT JOIN orders o ON p.id = o.product_id
+                    GROUP BY p.id, p.name, p.category, p.price, p.description, p.image_url, p.stock_quantity
+                    ORDER BY total_orders DESC
+                    LIMIT %s
+                """
+                
+                db_query_start = time.time()
+                cursor.execute(query, (limit,))
+                results = cursor.fetchall()
+                db_query_duration_ms = (time.time() - db_query_start) * 1000
+                
+                db_span.set_attribute("db.query.duration_ms", db_query_duration_ms)
+                db_span.set_attribute("db.rows_returned", len(results))
+                db_span.set_attribute("db.aggregation.count", True)
+                db_span.set_attribute("db.aggregation.sum", True)
+                db_span.set_attribute("db.aggregation.max", True)
+                
+                db_span.add_event("PostgreSQL JOIN completed successfully", {
+                    "rows_returned": len(results),
+                    "duration_ms": round(db_query_duration_ms, 2),
+                    "aggregations_used": ["COUNT", "SUM", "MAX"]
+                })
+            
+            # Calculate duration and record to histogram
+            total_duration_ms = (time.time() - query_start) * 1000
+            db_query_duration_histogram.record(total_duration_ms, {
+                "operation": "JOIN",
+                "complexity": "high"
+            })
+            
+            span.set_attribute("db.total_duration_ms", total_duration_ms)
+            span.set_attribute("db.query.success", True)
+            
+            # Format results
+            products = [
+                {
+                    "product_id": row[0],
+                    "name": row[1],
+                    "category": row[2],
+                    "price": float(row[3]),
+                    "description": row[4],
+                    "image_url": row[5],
+                    "stock_quantity": row[6],
+                    "popularity": {
+                        "total_orders": row[7],
+                        "total_quantity_sold": int(row[8]),
+                        "last_order_date": row[9].isoformat() if row[9] else None
+                    }
+                }
+                for row in results
+            ]
+            
+            return jsonify({
+                "products": products,
+                "count": len(products),
+                "query_type": "JOIN",
+                "duration_ms": round(total_duration_ms, 2)
+            })
+            
+        except Exception as e:
+            error_msg = str(e)
+            span.set_attribute("db.error", error_msg)
+            span.set_attribute("db.query.success", False)
+            span.record_exception(e)
+            
+            # Return 503 for connection errors
+            if "ConnectionError" in error_msg or "Could not acquire connection" in error_msg:
+                return jsonify({"error": error_msg}), 503
+            
+            return jsonify({"error": error_msg}), 500
+            
+        finally:
+            # Always decrement counters
+            with active_queries_lock:
+                active_queries_count -= 1
+                db_active_queries_gauge.add(-1)
+            
+            if conn:
+                db_pool_active_gauge.add(-1)
+                return_connection(conn)
+            
+            # Detach trace context
+            if token:
+                context.detach(token)
+
+
 @app.route('/demo/reset', methods=['POST'])
 def demo_reset():
     """

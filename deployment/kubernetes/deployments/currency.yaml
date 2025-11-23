@@ -1,0 +1,73 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: currency
+  namespace: ecommerce-demo
+  labels:
+    app: currency
+    service: currency
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: currency
+  template:
+    metadata:
+      labels:
+        app: currency
+        service: currency
+    spec:
+      containers:
+        - name: currency
+          image: ecommerce-currency:latest
+          imagePullPolicy: IfNotPresent
+          command: ["python", "services/currency_service.py"]
+          env:
+            - name: SERVICE_NAME
+              value: "currency"
+            - name: CX_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: ecommerce-secrets
+                  key: CX_TOKEN
+            - name: CX_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: ecommerce-config
+                  key: CX_ENDPOINT
+            - name: CX_APPLICATION_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: ecommerce-config
+                  key: CX_APPLICATION_NAME
+            - name: CX_SUBSYSTEM_NAME
+              value: "currency"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: ecommerce-config
+                  key: OTEL_EXPORTER_OTLP_ENDPOINT
+          ports:
+            - containerPort: 8018
+              name: http
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "250m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8018
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8018
+            initialDelaySeconds: 20
+            periodSeconds: 10
+

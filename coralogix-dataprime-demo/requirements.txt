@@ -1,10 +1,8 @@
 # Core dependencies
-openai>=1.97.0
-llm-tracekit[openai]==1.3.1
 pydantic==2.8.2
 python-dotenv==1.0.1
 
-# OpenTelemetry GenAI Semantic Conventions
+# OpenTelemetry
 opentelemetry-api>=1.32.1
 opentelemetry-sdk>=1.32.0
 opentelemetry-semantic-conventions>=0.48b0
@@ -12,42 +10,22 @@ opentelemetry-exporter-otlp>=1.32.0
 opentelemetry-instrumentation>=0.48b0
 opentelemetry-instrumentation-sqlite3>=0.48b0
 opentelemetry-instrumentation-flask>=0.48b0
-
-# Development and testing
-pytest==8.2.2
-pytest-asyncio==0.23.7
-pytest-mock==3.11.1
+opentelemetry-instrumentation-requests>=0.48b0
+opentelemetry-instrumentation-psycopg2>=0.48b0
 
 # Utilities
-rich==13.7.1  # For beautiful CLI output
-typer==0.12.3  # For CLI interface
 structlog==24.2.0  # For structured logging
-requests==2.31.0  # For HTTP requests (testing connections)
+requests==2.31.0  # For HTTP requests
 
-# Optional: Data processing
-numpy==1.26.4
-pandas==2.2.2
-
-# Optional: Text processing for intent classification
-scikit-learn==1.5.1
-sentence-transformers==3.0.1
-
-# Flask web interface (following AI_Assistant pattern)
+# Flask web interface
 flask>=2.3.0
 flask-cors>=4.0.0
 flask-socketio>=5.3.0
 
-# Voice processing
+# Async HTTP
 websockets>=12.0
-
-# MCP client for real data execution
 aiohttp>=3.10.0
 
-# Additional dependencies for distributed system
-opentelemetry-instrumentation-requests>=0.48b0
-opentelemetry-instrumentation-psycopg2>=0.48b0
-
 # Database and caching
-# SQLite is built into Python - no additional dependencies needed
 redis==5.0.1  # Redis client for distributed caching
 psycopg2-binary==2.9.9  # PostgreSQL adapter for product catalog

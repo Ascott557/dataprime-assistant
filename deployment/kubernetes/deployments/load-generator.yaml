@@ -1,0 +1,93 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: load-generator
+  namespace: ecommerce-demo
+  labels:
+    app: load-generator
+    service: load-generator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: load-generator
+  template:
+    metadata:
+      labels:
+        app: load-generator
+        service: load-generator
+    spec:
+      containers:
+        - name: load-generator
+          image: ecommerce-load-generator:latest
+          imagePullPolicy: IfNotPresent
+          command: ["python", "services/load_generator.py"]
+          env:
+            - name: SERVICE_NAME
+              value: "load-generator"
+            - name: CX_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: ecommerce-secrets
+                  key: CX_TOKEN
+            - name: CX_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: ecommerce-config
+                  key: CX_ENDPOINT
+            - name: CX_APPLICATION_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: ecommerce-config
+                  key: CX_APPLICATION_NAME
+            - name: CX_SUBSYSTEM_NAME
+              value: "load-generator"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: ecommerce-config
+                  key: OTEL_EXPORTER_OTLP_ENDPOINT
+            - name: PRODUCT_CATALOG_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: ecommerce-config
+                  key: PRODUCT_CATALOG_URL
+            - name: CHECKOUT_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: ecommerce-config
+                  key: CHECKOUT_URL
+            - name: CART_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: ecommerce-config
+                  key: CART_URL
+            - name: DEMO_MODE
+              valueFrom:
+                configMapKeyRef:
+                  name: ecommerce-config
+                  key: DEMO_MODE
+          ports:
+            - containerPort: 8010
+              name: http
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8010
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8010
+            initialDelaySeconds: 20
+            periodSeconds: 10
+

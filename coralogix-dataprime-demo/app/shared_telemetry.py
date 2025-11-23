@@ -26,24 +26,23 @@ def ensure_telemetry_initialized():
         return True
         
     try:
-        print("🔧 Initializing telemetry with LLM content capture + k8s enrichment...")
+        print("🔧 Initializing telemetry for e-commerce platform...")
         
-        from llm_tracekit import OpenAIInstrumentor
         from opentelemetry import trace
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.resources import Resource
         from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
-        print("✅ llm_tracekit and OpenTelemetry SDK imports successful")
+        print("✅ OpenTelemetry SDK imports successful")
         
         # Get service metadata from environment
-        service_name = os.getenv('SERVICE_NAME', 'dataprime_assistant')
+        service_name = os.getenv('SERVICE_NAME', 'ecommerce-service')
         otel_endpoint = os.getenv('OTEL_EXPORTER_OTLP_ENDPOINT', 'http://coralogix-opentelemetry-collector:4317')
         
         print(f"🔧 Service: {service_name}")
         print(f"🔧 OTel Collector endpoint: {otel_endpoint}")
-        print(f"🔧 Application: {os.getenv('CX_APPLICATION_NAME', 'dataprime-demo')}")
-        print(f"🔧 Subsystem: {os.getenv('CX_SUBSYSTEM_NAME', 'ai-assistant')}")
+        print(f"🔧 Application: {os.getenv('CX_APPLICATION_NAME', 'ecommerce-platform')}")
+        print(f"🔧 Subsystem: {os.getenv('CX_SUBSYSTEM_NAME', 'ecommerce-services')}")
         
         # Create resource with service identity and metadata
         resource = Resource.create({
@@ -61,16 +60,6 @@ def ensure_telemetry_initialized():
         provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
         
         print("✅ OTLP exporter configured for local OTel Collector")
-        
-        # Enable content capture via environment variables BEFORE instrumenting
-        # These environment variables control OpenTelemetry GenAI semantic conventions
-        os.environ["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"] = "true"
-        
-        # Initialize OpenAI instrumentation
-        # The instrumentor reads the environment variable above for content capture
-        OpenAIInstrumentor().instrument()
-        
-        print("✅ OpenAI instrumentation enabled (content capture: OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true)")
         
         # Try to add other instrumentation if available, but don't fail if not
         try:
@@ -92,7 +81,7 @@ def ensure_telemetry_initialized():
             print("⚠️ SQLite instrumentation not available - continuing without it")
         
         _telemetry_initialized = True
-        print("✅ Telemetry initialized successfully (minimal working version)")
+        print("✅ Telemetry initialized successfully for e-commerce platform")
         return True
         
     except Exception as e:

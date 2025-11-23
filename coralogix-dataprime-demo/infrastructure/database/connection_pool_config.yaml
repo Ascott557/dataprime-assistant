@@ -1,0 +1,77 @@
+# =============================================================================
+# Black Friday Demo: Connection Pool Misconfiguration
+# =============================================================================
+#
+# SCENARIO: Database configuration was not updated for Black Friday traffic.
+# Three critical misconfigurations exist:
+#
+# 1. max_connections too low (20 instead of 100+)
+# 2. connection_timeout too aggressive (5s instead of 10s+)
+# 3. Read replicas disabled (all traffic hits primary database)
+#
+# =============================================================================
+
+database:
+  # BUG #1: Connection pool sized for normal traffic (30 rpm)
+  # Black Friday traffic reaches 120 rpm, requiring 80-100 connections
+  max_connections: 20  # ← SHOULD BE: 100
+  
+  # Normal configuration for reference:
+  # max_connections: 100  # Correct for Black Friday load
+  
+  # BUG #2: Timeout too short for complex queries
+  # During database degradation, queries take 2500ms+
+  connection_timeout: 5s  # ← SHOULD BE: 10s
+  
+  # Normal configuration for reference:
+  # connection_timeout: 10s
+  
+  # Connection pool behavior
+  min_connections: 5
+  connection_lifetime: 3600s  # 1 hour
+  idle_timeout: 300s          # 5 minutes
+
+# BUG #3: Read replicas disabled - THIS IS THE ROOT CAUSE!
+# All read traffic hits the primary database instead of being distributed
+read_replicas:
+  enabled: false  # ← SHOULD BE: true
+  
+  # This should be:
+  # enabled: true
+  # replicas:
+  #   - host: postgres-replica-1
+  #     port: 5432
+  #     weight: 50
+  #   - host: postgres-replica-2
+  #     port: 5432
+  #     weight: 50
+
+# Load balancing strategy (ineffective without replicas)
+load_balancing:
+  strategy: round_robin  # Useless when only one database
+  health_check_interval: 30s
+
+# =============================================================================
+# IMPACT TIMELINE:
+# =============================================================================
+# Minutes 0-15:  20 connections sufficient (traffic ramping up)
+# Minutes 15-18: Pool utilization reaches 80% (16/20 connections)
+# Minutes 18-20: Pool utilization reaches 95% (19/20 connections)
+# Minutes 20+:   Connection pool exhausted - 35% of requests fail
+#
+# SYMPTOMS:
+# - "Connection timeout after 5000ms" errors
+# - HTTP 503 responses from checkout service
+# - Cart abandonment rate increases
+# - Revenue loss estimated at $50K+ per minute
+#
+# =============================================================================
+# CORRECT CONFIGURATION:
+# =============================================================================
+# max_connections: 100
+# connection_timeout: 10s
+# read_replicas.enabled: true (with 2+ replicas)
+#
+# This would distribute load and prevent pool exhaustion
+# =============================================================================
+

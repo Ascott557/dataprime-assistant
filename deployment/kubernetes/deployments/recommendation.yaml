@@ -1,0 +1,78 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: recommendation
+  namespace: ecommerce-demo
+  labels:
+    app: recommendation
+    service: recommendation
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: recommendation
+  template:
+    metadata:
+      labels:
+        app: recommendation
+        service: recommendation
+    spec:
+      containers:
+        - name: recommendation
+          image: ecommerce-recommendation:latest
+          imagePullPolicy: IfNotPresent
+          command: ["python", "services/recommendation_service.py"]
+          env:
+            - name: SERVICE_NAME
+              value: "recommendation"
+            - name: CX_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: ecommerce-secrets
+                  key: CX_TOKEN
+            - name: CX_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: ecommerce-config
+                  key: CX_ENDPOINT
+            - name: CX_APPLICATION_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: ecommerce-config
+                  key: CX_APPLICATION_NAME
+            - name: CX_SUBSYSTEM_NAME
+              value: "recommendation"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: ecommerce-config
+                  key: OTEL_EXPORTER_OTLP_ENDPOINT
+            - name: PRODUCT_CATALOG_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: ecommerce-config
+                  key: PRODUCT_CATALOG_URL
+          ports:
+            - containerPort: 8011
+              name: http
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8011
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8011
+            initialDelaySeconds: 20
+            periodSeconds: 10
+

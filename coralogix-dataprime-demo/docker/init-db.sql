@@ -1,149 +1,114 @@
--- E-commerce Product Database Schema
--- 100 products across 5 categories for Coralogix demo
+-- E-commerce Database Schema
+-- PostgreSQL initialization script for reinvent-ecommerce-demo
 
+-- Drop existing tables if they exist
+DROP TABLE IF EXISTS orders CASCADE;
+DROP TABLE IF EXISTS products CASCADE;
+
+-- Products table
 CREATE TABLE products (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     category VARCHAR(100) NOT NULL,
     price DECIMAL(10, 2) NOT NULL,
+    stock_quantity INTEGER NOT NULL DEFAULT 0,
     description TEXT,
     image_url VARCHAR(500),
-    stock_quantity INTEGER DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Create indexes for efficient queries
+-- Create index on category for fast lookups (important for demo - shows index usage)
 CREATE INDEX idx_products_category ON products(category);
+
+-- Create index on price for range queries
 CREATE INDEX idx_products_price ON products(price);
-CREATE INDEX idx_products_category_price ON products(category, price);
 
--- Insert 100 products (20 per category)
+-- Orders table
+CREATE TABLE orders (
+    id SERIAL PRIMARY KEY,
+    user_id VARCHAR(255) NOT NULL,
+    product_id INTEGER NOT NULL,
+    quantity INTEGER NOT NULL DEFAULT 1,
+    order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+);
 
--- CATEGORY 1: Wireless Headphones (20 products) - $50-$300
-INSERT INTO products (name, category, price, description, image_url, stock_quantity) VALUES
-('Sony WH-1000XM5', 'Wireless Headphones', 120.00, 'Premium noise-cancelling over-ear headphones with 30-hour battery life', 'https://example.com/sony-xm5.jpg', 45),
-('Bose QuietComfort 45', 'Wireless Headphones', 130.00, 'Comfortable noise-cancelling headphones with excellent sound quality', 'https://example.com/bose-qc45.jpg', 32),
-('Apple AirPods Pro', 'Wireless Headphones', 89.99, 'True wireless earbuds with active noise cancellation', 'https://example.com/airpods-pro.jpg', 67),
-('Sennheiser Momentum 4', 'Wireless Headphones', 149.99, 'Audiophile-grade wireless headphones with adaptive ANC', 'https://example.com/sennheiser-m4.jpg', 28),
-('Beats Studio Pro', 'Wireless Headphones', 99.99, 'Stylish wireless headphones with powerful bass', 'https://example.com/beats-studio.jpg', 54),
-('JBL Live 660NC', 'Wireless Headphones', 79.99, 'Budget-friendly ANC headphones with great battery life', 'https://example.com/jbl-live.jpg', 71),
-('Anker Soundcore Q30', 'Wireless Headphones', 59.99, 'Value ANC headphones with 40-hour battery', 'https://example.com/anker-q30.jpg', 88),
-('Jabra Elite 85h', 'Wireless Headphones', 109.99, 'Premium wireless headphones with smart ANC', 'https://example.com/jabra-85h.jpg', 41),
-('Sony WF-1000XM4', 'Wireless Headphones', 119.99, 'Top-tier true wireless earbuds with LDAC', 'https://example.com/sony-wf.jpg', 39),
-('Audio-Technica ATH-M50xBT2', 'Wireless Headphones', 99.00, 'Studio-quality wireless headphones', 'https://example.com/ath-m50x.jpg', 52),
-('Samsung Galaxy Buds Pro', 'Wireless Headphones', 79.99, 'Premium wireless earbuds for Samsung users', 'https://example.com/galaxy-buds.jpg', 63),
-('AKG N700NC M2', 'Wireless Headphones', 89.99, 'Lightweight ANC headphones with clear sound', 'https://example.com/akg-n700.jpg', 35),
-('Skullcandy Crusher Evo', 'Wireless Headphones', 69.99, 'Bass-heavy wireless headphones with haptic feedback', 'https://example.com/crusher-evo.jpg', 47),
-('Microsoft Surface Headphones 2', 'Wireless Headphones', 119.99, 'Premium headphones optimized for Microsoft devices', 'https://example.com/surface-hp.jpg', 29),
-('Bowers & Wilkins PX7', 'Wireless Headphones', 179.99, 'Luxury wireless headphones with exceptional sound', 'https://example.com/bw-px7.jpg', 18),
-('Shure AONIC 50', 'Wireless Headphones', 159.99, 'Professional-grade wireless headphones', 'https://example.com/shure-aonic.jpg', 22),
-('Beyerdynamic Amiron Wireless', 'Wireless Headphones', 249.99, 'High-end audiophile wireless headphones', 'https://example.com/beyer-amiron.jpg', 12),
-('Grado GW100', 'Wireless Headphones', 129.99, 'Open-back wireless headphones with signature Grado sound', 'https://example.com/grado-gw100.jpg', 31),
-('Master & Dynamic MW65', 'Wireless Headphones', 199.99, 'Premium wireless headphones with luxury materials', 'https://example.com/md-mw65.jpg', 15),
-('1MORE SonoFlow', 'Wireless Headphones', 69.99, 'Budget ANC headphones with Hi-Res Audio', 'https://example.com/1more-sonoflow.jpg', 59);
+-- Create index on product_id for join performance
+CREATE INDEX idx_orders_product_id ON orders(product_id);
 
--- CATEGORY 2: Kitchen (20 products) - $20-$200
-INSERT INTO products (name, category, price, description, image_url, stock_quantity) VALUES
-('Professional Knife Set 8-Piece', 'Kitchen', 78.50, 'High-carbon stainless steel chef knives with ergonomic handles', 'https://example.com/knife-set.jpg', 28),
-('KitchenAid Stand Mixer 5Qt', 'Kitchen', 145.00, 'Powerful stand mixer with 10 speeds and multiple attachments', 'https://example.com/kitchenaid-mixer.jpg', 15),
-('Instant Pot Duo 7-in-1', 'Kitchen', 89.99, 'Multi-functional pressure cooker and slow cooker', 'https://example.com/instant-pot.jpg', 42),
-('Cuisinart Food Processor', 'Kitchen', 99.99, 'Large capacity food processor with multiple blades', 'https://example.com/cuisinart-fp.jpg', 31),
-('Ninja Air Fryer', 'Kitchen', 79.99, 'Digital air fryer with 4-quart capacity', 'https://example.com/ninja-airfryer.jpg', 56),
-('Lodge Cast Iron Skillet 12"', 'Kitchen', 34.99, 'Pre-seasoned cast iron skillet for perfect searing', 'https://example.com/lodge-skillet.jpg', 68),
-('OXO Good Grips Utensil Set', 'Kitchen', 29.99, 'Complete kitchen utensil set with comfortable grips', 'https://example.com/oxo-utensils.jpg', 73),
-('Pyrex Glass Bowl Set', 'Kitchen', 24.99, 'Nesting glass mixing bowls with lids', 'https://example.com/pyrex-bowls.jpg', 91),
-('Vitamix Blender E310', 'Kitchen', 189.99, 'Professional-grade blender for smoothies and soups', 'https://example.com/vitamix.jpg', 19),
-('All-Clad Stainless Cookware Set', 'Kitchen', 299.99, 'Premium 10-piece cookware set', 'https://example.com/allclad-set.jpg', 11),
-('Breville Espresso Machine', 'Kitchen', 199.99, 'Semi-automatic espresso machine with milk frother', 'https://example.com/breville-espresso.jpg', 24),
-('Wusthof Santoku Knife', 'Kitchen', 59.99, 'German-made santoku knife with razor-sharp edge', 'https://example.com/wusthof-santoku.jpg', 37),
-('Le Creuset Dutch Oven 5.5Qt', 'Kitchen', 249.99, 'Enameled cast iron Dutch oven in signature colors', 'https://example.com/lecreuset-dutch.jpg', 16),
-('KitchenAid Immersion Blender', 'Kitchen', 49.99, 'Variable-speed immersion blender with accessories', 'https://example.com/immersion-blender.jpg', 44),
-('Microplane Grater Set', 'Kitchen', 22.99, 'Professional-quality grater and zester set', 'https://example.com/microplane.jpg', 82),
-('Staub Braiser Pan', 'Kitchen', 179.99, 'Cast iron braiser with self-basting lid', 'https://example.com/staub-braiser.jpg', 18),
-('Zwilling Knife Block Set', 'Kitchen', 149.99, 'German knife set with hardwood block', 'https://example.com/zwilling-set.jpg', 21),
-('Anova Sous Vide Precision Cooker', 'Kitchen', 119.99, 'WiFi-enabled sous vide immersion circulator', 'https://example.com/anova-sousvide.jpg', 29),
-('Cuisinart Coffee Maker 12-Cup', 'Kitchen', 69.99, 'Programmable drip coffee maker with thermal carafe', 'https://example.com/cuisinart-coffee.jpg', 48),
-('OXO Kitchen Scale Digital', 'Kitchen', 34.99, 'Precise digital kitchen scale with pull-out display', 'https://example.com/oxo-scale.jpg', 65);
+-- Create index on user_id for user order lookups
+CREATE INDEX idx_orders_user_id ON orders(user_id);
 
--- CATEGORY 3: Fitness (20 products) - $15-$150
-INSERT INTO products (name, category, price, description, image_url, stock_quantity) VALUES
-('Premium Yoga Mat Extra Thick', 'Fitness', 34.99, 'Non-slip yoga mat with alignment marks and carrying strap', 'https://example.com/yoga-mat.jpg', 56),
-('Resistance Bands Set of 5', 'Fitness', 24.99, 'Color-coded resistance bands with handles and door anchor', 'https://example.com/resistance-bands.jpg', 89),
-('Adjustable Dumbbell Set 50lb', 'Fitness', 129.99, 'Space-saving adjustable dumbbells with quick-change mechanism', 'https://example.com/dumbbells.jpg', 27),
-('Foam Roller High Density', 'Fitness', 19.99, 'Muscle roller for post-workout recovery and massage', 'https://example.com/foam-roller.jpg', 74),
-('Fitbit Charge 5', 'Fitness', 99.99, 'Advanced fitness tracker with GPS and heart rate monitoring', 'https://example.com/fitbit-charge5.jpg', 42),
-('Jump Rope Weighted', 'Fitness', 15.99, 'Adjustable weighted jump rope for cardio workouts', 'https://example.com/jump-rope.jpg', 93),
-('Kettlebell 20lb Cast Iron', 'Fitness', 29.99, 'Durable cast iron kettlebell with comfort grip', 'https://example.com/kettlebell.jpg', 61),
-('Pull-up Bar Doorway', 'Fitness', 24.99, 'No-screw doorway pull-up bar with multiple grip positions', 'https://example.com/pullup-bar.jpg', 78),
-('Exercise Ball 65cm', 'Fitness', 18.99, 'Anti-burst stability ball with pump included', 'https://example.com/exercise-ball.jpg', 85),
-('Yoga Block Set Cork', 'Fitness', 22.99, 'Eco-friendly cork yoga blocks, set of 2', 'https://example.com/yoga-blocks.jpg', 67),
-('Ab Roller Wheel', 'Fitness', 16.99, 'Dual-wheel ab roller with knee pad', 'https://example.com/ab-roller.jpg', 88),
-('Ankle Weights Pair 5lb', 'Fitness', 21.99, 'Adjustable ankle weights for leg exercises', 'https://example.com/ankle-weights.jpg', 52),
-('Battle Rope 40ft', 'Fitness', 49.99, 'Heavy-duty battle rope for HIIT training', 'https://example.com/battle-rope.jpg', 34),
-('Suspension Trainer Pro', 'Fitness', 79.99, 'Complete bodyweight training system with door anchor', 'https://example.com/suspension-trainer.jpg', 38),
-('Medicine Ball 15lb', 'Fitness', 32.99, 'Textured medicine ball for core exercises', 'https://example.com/medicine-ball.jpg', 55),
-('Squat Rack Adjustable', 'Fitness', 149.99, 'Foldable squat rack for home gym', 'https://example.com/squat-rack.jpg', 19),
-('Weight Bench Adjustable', 'Fitness', 89.99, 'Multi-position weight bench with leg developer', 'https://example.com/weight-bench.jpg', 26),
-('Yoga Strap Cotton', 'Fitness', 12.99, 'Extra-long yoga strap with D-ring buckle', 'https://example.com/yoga-strap.jpg', 96),
-('Massage Gun Deep Tissue', 'Fitness', 79.99, 'Percussion massage gun with multiple attachments', 'https://example.com/massage-gun.jpg', 43),
-('Balance Trainer Half Ball', 'Fitness', 59.99, 'BOSU-style balance trainer for core stability', 'https://example.com/balance-trainer.jpg', 31);
+-- Seed products data (diverse categories for demo)
+INSERT INTO products (name, category, price, stock_quantity, description, image_url) VALUES
+-- Electronics
+('Laptop Pro 15"', 'electronics', 1299.99, 50, 'High-performance laptop with 16GB RAM and 512GB SSD', 'https://example.com/laptop.jpg'),
+('Wireless Mouse', 'electronics', 29.99, 200, 'Ergonomic wireless mouse with precision tracking', 'https://example.com/mouse.jpg'),
+('USB-C Cable 6ft', 'electronics', 12.99, 500, 'Fast charging USB-C cable with reinforced connector', 'https://example.com/cable.jpg'),
+('Bluetooth Headphones', 'electronics', 89.99, 150, 'Noise-cancelling Bluetooth headphones with 30hr battery', 'https://example.com/headphones.jpg'),
+('4K Monitor 27"', 'electronics', 349.99, 80, 'Ultra HD 4K monitor with HDR support', 'https://example.com/monitor.jpg'),
 
--- CATEGORY 4: Pet Supplies (20 products) - $10-$80
-INSERT INTO products (name, category, price, description, image_url, stock_quantity) VALUES
-('Dog Toy Bundle Variety Pack', 'Pet Supplies', 24.99, 'Assorted durable dog toys including rope, ball, and squeaky toys', 'https://example.com/dog-toy-bundle.jpg', 120),
-('Cat Scratching Post Tall', 'Pet Supplies', 45.00, 'Tall sisal scratching post with carpeted base', 'https://example.com/cat-post.jpg', 34),
-('Automatic Pet Feeder', 'Pet Supplies', 59.99, 'Programmable automatic feeder with portion control', 'https://example.com/auto-feeder.jpg', 47),
-('Orthopedic Dog Bed Large', 'Pet Supplies', 49.99, 'Memory foam dog bed with removable washable cover', 'https://example.com/dog-bed.jpg', 38),
-('Interactive Cat Toy Laser', 'Pet Supplies', 19.99, 'Automatic laser toy to keep cats entertained', 'https://example.com/cat-laser.jpg', 82),
-('Dog Leash Retractable', 'Pet Supplies', 22.99, 'Heavy-duty retractable leash up to 16 feet', 'https://example.com/retract-leash.jpg', 95),
-('Cat Litter Box Covered', 'Pet Supplies', 34.99, 'Large covered litter box with carbon filter', 'https://example.com/litter-box.jpg', 56),
-('Pet Water Fountain', 'Pet Supplies', 29.99, 'Circulating water fountain encourages hydration', 'https://example.com/water-fountain.jpg', 71),
-('Dog Chew Toys Kong Pack', 'Pet Supplies', 18.99, 'Durable rubber chew toys in multiple sizes', 'https://example.com/kong-toys.jpg', 103),
-('Cat Tunnel Collapsible', 'Pet Supplies', 16.99, 'Crinkle tunnel toy with peek-a-boo holes', 'https://example.com/cat-tunnel.jpg', 88),
-('Pet Grooming Kit', 'Pet Supplies', 39.99, 'Complete grooming set with clippers and brushes', 'https://example.com/grooming-kit.jpg', 52),
-('Dog Training Treats', 'Pet Supplies', 12.99, 'Healthy training treats in resealable bag', 'https://example.com/training-treats.jpg', 127),
-('Cat Tree Multi-Level', 'Pet Supplies', 79.99, 'Tall cat tree with platforms, condos, and toys', 'https://example.com/cat-tree.jpg', 23),
-('Pet Carrier Airline Approved', 'Pet Supplies', 44.99, 'Soft-sided pet carrier for travel', 'https://example.com/pet-carrier.jpg', 41),
-('Dog Collar LED Safety', 'Pet Supplies', 15.99, 'Rechargeable LED collar for night visibility', 'https://example.com/led-collar.jpg', 76),
-('Pet Hair Remover Brush', 'Pet Supplies', 11.99, 'Self-cleaning slicker brush for grooming', 'https://example.com/hair-brush.jpg', 94),
-('Interactive Dog Puzzle Toy', 'Pet Supplies', 24.99, 'Mental stimulation puzzle with treat compartments', 'https://example.com/puzzle-toy.jpg', 67),
-('Cat Food Bowl Elevated', 'Pet Supplies', 19.99, 'Raised feeding station with stainless steel bowls', 'https://example.com/elevated-bowl.jpg', 58),
-('Dog Waste Bag Dispenser', 'Pet Supplies', 9.99, 'Leash attachment waste bag dispenser with bags', 'https://example.com/waste-bags.jpg', 142),
-('Pet Nail Clippers Professional', 'Pet Supplies', 14.99, 'Safety nail clippers with guard for pets', 'https://example.com/nail-clippers.jpg', 81);
+-- Furniture
+('Desk Chair', 'furniture', 249.99, 30, 'Comfortable ergonomic office chair with lumbar support', 'https://example.com/chair.jpg'),
+('Standing Desk', 'furniture', 599.99, 15, 'Adjustable height standing desk with memory presets', 'https://example.com/desk.jpg'),
+('Bookshelf 5-Tier', 'furniture', 129.99, 40, 'Sturdy wooden bookshelf with 5 adjustable shelves', 'https://example.com/bookshelf.jpg'),
+('Floor Lamp', 'furniture', 79.99, 60, 'Modern LED floor lamp with adjustable brightness', 'https://example.com/lamp.jpg'),
 
--- CATEGORY 5: Office (20 products) - $30-$400
-INSERT INTO products (name, category, price, description, image_url, stock_quantity) VALUES
-('Ergonomic Office Chair Mesh', 'Office', 189.99, 'Adjustable ergonomic chair with lumbar support and breathable mesh', 'https://example.com/office-chair.jpg', 12),
-('Standing Desk Electric', 'Office', 299.00, 'Electric height-adjustable standing desk with memory presets', 'https://example.com/standing-desk.jpg', 8),
-('Monitor Arm Dual Mount', 'Office', 79.99, 'Gas spring monitor arm for two displays up to 32"', 'https://example.com/monitor-arm.jpg', 34),
-('Desk Lamp LED Architect', 'Office', 49.99, 'Adjustable LED desk lamp with USB charging port', 'https://example.com/desk-lamp.jpg', 58),
-('Wireless Keyboard Mouse Combo', 'Office', 44.99, 'Ergonomic wireless keyboard and mouse set', 'https://example.com/kb-mouse.jpg', 72),
-('Cable Management Box', 'Office', 19.99, 'Hide and organize power strips and cables', 'https://example.com/cable-box.jpg', 96),
-('Desk Organizer Bamboo', 'Office', 29.99, 'Multi-compartment desk organizer with drawer', 'https://example.com/desk-organizer.jpg', 83),
-('Laptop Stand Aluminum', 'Office', 39.99, 'Ergonomic laptop stand with ventilation', 'https://example.com/laptop-stand.jpg', 67),
-('Whiteboard Large Magnetic', 'Office', 59.99, 'Dry erase board with marker tray and mounting kit', 'https://example.com/whiteboard.jpg', 41),
-('Office Chair Mat', 'Office', 34.99, 'Clear chair mat protects floors from rolling chair', 'https://example.com/chair-mat.jpg', 52),
-('Desk Pad Extended', 'Office', 24.99, 'Large mouse pad covering entire desk surface', 'https://example.com/desk-pad.jpg', 88),
-('File Cabinet 3-Drawer', 'Office', 149.99, 'Lockable metal file cabinet with smooth glides', 'https://example.com/file-cabinet.jpg', 18),
-('Bookshelf 5-Tier', 'Office', 79.99, 'Industrial bookshelf with metal frame', 'https://example.com/bookshelf.jpg', 26),
-('Webcam HD 1080p', 'Office', 69.99, 'High-definition webcam with auto-focus', 'https://example.com/webcam.jpg', 54),
-('Headset Noise-Cancelling USB', 'Office', 89.99, 'Professional headset with microphone for calls', 'https://example.com/headset.jpg', 43),
-('Surge Protector 12-Outlet', 'Office', 29.99, 'Heavy-duty surge protector with USB ports', 'https://example.com/surge-protector.jpg', 75),
-('Paper Shredder Cross-Cut', 'Office', 59.99, 'Personal shredder for sensitive documents', 'https://example.com/shredder.jpg', 31),
-('Footrest Adjustable', 'Office', 34.99, 'Ergonomic footrest with angle adjustment', 'https://example.com/footrest.jpg', 62),
-('Desk Converter Sit-Stand', 'Office', 129.99, 'Desktop riser converts any desk to standing', 'https://example.com/desk-converter.jpg', 22),
-('Monitor Privacy Screen', 'Office', 39.99, 'Anti-glare privacy filter for 24" monitor', 'https://example.com/privacy-screen.jpg', 48);
+-- Appliances
+('Coffee Maker', 'appliances', 89.99, 75, 'Programmable 12-cup coffee maker with thermal carafe', 'https://example.com/coffee.jpg'),
+('Blender 1000W', 'appliances', 59.99, 100, 'High-speed blender for smoothies and food processing', 'https://example.com/blender.jpg'),
+('Microwave 1.1 Cu Ft', 'appliances', 119.99, 50, 'Compact microwave with 10 power levels', 'https://example.com/microwave.jpg'),
+('Air Fryer 5Qt', 'appliances', 99.99, 90, 'Digital air fryer with 8 preset cooking functions', 'https://example.com/airfryer.jpg'),
 
--- Create a view for quick category statistics
-CREATE VIEW category_stats AS
+-- Sports & Outdoors
+('Running Shoes', 'sports', 119.99, 120, 'Lightweight running shoes with cushioned sole', 'https://example.com/shoes.jpg'),
+('Yoga Mat', 'sports', 34.99, 80, 'Non-slip yoga mat with carrying strap', 'https://example.com/yogamat.jpg'),
+('Water Bottle 32oz', 'sports', 24.99, 300, 'Insulated stainless steel water bottle', 'https://example.com/bottle.jpg'),
+('Dumbbell Set', 'sports', 149.99, 45, 'Adjustable dumbbell set 5-50 lbs', 'https://example.com/dumbbells.jpg'),
+('Resistance Bands', 'sports', 29.99, 150, 'Set of 5 resistance bands with door anchor', 'https://example.com/bands.jpg'),
+
+-- Home & Kitchen
+('Cookware Set 10-Piece', 'kitchen', 199.99, 35, 'Nonstick cookware set with glass lids', 'https://example.com/cookware.jpg'),
+('Knife Set 15-Piece', 'kitchen', 79.99, 60, 'Professional kitchen knife set with block', 'https://example.com/knives.jpg'),
+('Dinnerware Set 16-Piece', 'kitchen', 89.99, 50, 'Modern stoneware dinnerware for 4', 'https://example.com/dinnerware.jpg');
+
+-- Seed some order data for popular products query demo
+INSERT INTO orders (user_id, product_id, quantity, order_date) VALUES
+('user-1001', 1, 1, NOW() - INTERVAL '5 days'),
+('user-1002', 4, 1, NOW() - INTERVAL '4 days'),
+('user-1003', 1, 1, NOW() - INTERVAL '3 days'),
+('user-1004', 14, 2, NOW() - INTERVAL '3 days'),
+('user-1005', 10, 1, NOW() - INTERVAL '2 days'),
+('user-1006', 15, 1, NOW() - INTERVAL '2 days'),
+('user-1007', 1, 1, NOW() - INTERVAL '1 day'),
+('user-1008', 4, 1, NOW() - INTERVAL '1 day'),
+('user-1009', 14, 1, NOW() - INTERVAL '1 day'),
+('user-1010', 15, 3, NOW() - INTERVAL '6 hours');
+
+-- Create a view for popular products (useful for analytics)
+CREATE VIEW popular_products AS
 SELECT 
-    category,
-    COUNT(*) as product_count,
-    MIN(price) as min_price,
-    MAX(price) as max_price,
-    AVG(price) as avg_price,
-    SUM(stock_quantity) as total_stock
-FROM products
-GROUP BY category;
+    p.id,
+    p.name,
+    p.category,
+    p.price,
+    COUNT(o.id) as total_orders,
+    SUM(o.quantity) as total_quantity_sold
+FROM products p
+LEFT JOIN orders o ON p.id = o.product_id
+GROUP BY p.id, p.name, p.category, p.price
+ORDER BY total_orders DESC;
 
+-- Grant permissions (adjust as needed for your security requirements)
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO ecommerce_user;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO ecommerce_user;
+GRANT SELECT ON popular_products TO ecommerce_user;
 
+-- Print success message
+DO $$
+BEGIN
+    RAISE NOTICE 'E-commerce database initialized successfully!';
+    RAISE NOTICE 'Products: % rows', (SELECT COUNT(*) FROM products);
+    RAISE NOTICE 'Orders: % rows', (SELECT COUNT(*) FROM orders);
+END $$;

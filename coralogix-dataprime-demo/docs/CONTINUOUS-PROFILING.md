@@ -256,3 +256,4 @@ securityContext:
 
 After Scene 9.5, proceed to **Scene 10: Logs with Cora AI** to see how structured logging and AI help investigate the database errors.
 
+

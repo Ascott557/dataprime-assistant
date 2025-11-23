@@ -2,38 +2,45 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: dataprime-config
-  namespace: dataprime-demo
+  name: ecommerce-config
+  namespace: ecommerce-demo
   labels:
-    app: dataprime-demo
+    app: ecommerce-platform
 data:
   # Coralogix Configuration
-  CX_DOMAIN: "eu2.coralogix.com"
-  CX_APPLICATION_NAME: "ecommerce-recommendation"
-  CX_SUBSYSTEM_NAME: "ecommerce-production"
-  
-  # Redis Configuration
-  REDIS_URL: "redis://redis:6379/0"
+  CX_ENDPOINT: "https://ingress.eu2.coralogix.com:443"
+  CX_APPLICATION_NAME: "ecommerce-platform"
+  CX_SUBSYSTEM_NAME: "ecommerce-services"
   
   # OpenTelemetry Configuration  
-  # Send traces to local OTel Collector (which forwards to Coralogix)
-  OTEL_EXPORTER_OTLP_ENDPOINT: "otel-collector.dataprime-demo.svc.cluster.local:4317"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector.ecommerce-demo.svc.cluster.local:4317"
   
-  # Database Configuration
-  DB_HOST: "postgres"
+  # PostgreSQL Database Configuration
+  POSTGRES_HOST: "postgresql-primary"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "ecommerce"
+  POSTGRES_USER: "ecommerce_user"
+  DB_HOST: "postgresql-primary"
   DB_PORT: "5432"
-  DB_NAME: "productcatalog"
-  DB_USER: "dbadmin"
+  DB_NAME: "ecommerce"
+  DB_USER: "ecommerce_user"
   DB_MAX_CONNECTIONS: "100"
   
+  # Redis Configuration
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6379"
+  
   # Service URLs (for inter-service communication)
-  PRODUCT_SERVICE_URL: "http://product-service:8014"
-  RECOMMENDATION_AI_URL: "http://recommendation-ai:8011"
-  VALIDATION_SERVICE_URL: "http://validation-service:8012"
-  STORAGE_SERVICE_URL: "http://storage-service:8015"
-  QUEUE_SERVICE_URL: "http://queue-service:8013"
+  PRODUCT_CATALOG_URL: "http://product-catalog:8014"
+  CHECKOUT_URL: "http://checkout:8016"
+  CART_URL: "http://cart:8013"
+  RECOMMENDATION_URL: "http://recommendation:8011"
+  CURRENCY_URL: "http://currency:8018"
+  SHIPPING_URL: "http://shipping:8019"
+  AD_URL: "http://ad-service:8017"
+  
+  # Demo Mode
+  DEMO_MODE: "normal"
   
   # Environment
   ENVIRONMENT: "production"
-  PROJECT_NAME: "ecommerce-recommendation"
-
