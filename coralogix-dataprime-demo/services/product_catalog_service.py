@@ -244,6 +244,12 @@ def get_products():
         span.set_attribute("db.system", "postgresql")
         span.set_attribute("db.active_queries", active_queries_count)
         
+        # Add traffic type attribute for V5 dual-mode traffic
+        traffic_type = request.args.get("traffic_type", "baseline")
+        span.set_attribute("traffic.type", traffic_type)
+        span.set_attribute("endpoint.type", "fast_indexed")
+        span.set_attribute("db.index_used", "idx_products_category_active")
+        
         # Get query parameters
         category = request.args.get('category')
         price_min = request.args.get('price_min', type=float)
@@ -396,6 +402,194 @@ def get_products():
             # Return 503 for connection errors (Scene 10)
             if "ConnectionError" in error_msg or "Could not acquire connection" in error_msg:
                 return jsonify({"error": error_msg}), 503
+            
+            return jsonify({"error": error_msg}), 500
+            
+        finally:
+            # Always decrement counters
+            with active_queries_lock:
+                active_queries_count -= 1
+                db_active_queries_gauge.add(-1)
+            
+            if conn:
+                db_pool_active_gauge.add(-1)
+                return_connection(conn)
+            
+            # Detach trace context
+            if token:
+                context.detach(token)
+
+
+@app.route('/products/recommendations', methods=['GET'])
+def get_product_recommendations():
+    """
+    Product Recommendations Endpoint - V5 Demo Traffic Failure Point
+    
+    This endpoint simulates slow, unindexed queries for product recommendations.
+    During demo mode, it exhibits progressive delays and failures to demonstrate
+    how a problematic feature can impact checkout flow.
+    
+    Query params:
+        category: Product category (optional)
+        traffic_type: Type of traffic (baseline/demo)
+    """
+    global active_queries_count
+    
+    # Extract and attach trace context
+    token, is_root = extract_and_attach_trace_context()
+    
+    with tracer.start_as_current_span("get_product_recommendations") as span:
+        # Increment active queries counter
+        with active_queries_lock:
+            active_queries_count += 1
+            db_active_queries_gauge.add(1)
+        
+        # Set traffic type attributes for V5
+        traffic_type = request.args.get("traffic_type", "demo")
+        span.set_attribute("traffic.type", traffic_type)
+        span.set_attribute("endpoint.type", "slow_unindexed")
+        span.set_attribute("db.index_used", "NONE")
+        span.set_attribute("db.system", "postgresql")
+        span.set_attribute("db.active_queries", active_queries_count)
+        
+        category = request.args.get('category', 'electronics')
+        span.set_attribute("query.category", category)
+        
+        query_start = time.time()
+        conn = None
+        
+        try:
+            # Get connection from pool
+            conn = get_connection()
+            
+            # Track pool metrics
+            pool_stats = get_pool_stats()
+            span.set_attribute("db.connection_pool.active", pool_stats["active_connections"])
+            span.set_attribute("db.connection_pool.max", pool_stats["max_connections"])
+            span.set_attribute("db.connection_pool.utilization_percent", pool_stats["utilization_percent"])
+            
+            # Progressive delay simulation for demo mode
+            if is_demo_mode():
+                demo_minute = calculate_demo_minute()
+                span.set_attribute("demo.minute", demo_minute)
+                
+                # Progressive delays: 100ms → 2800ms
+                if demo_minute >= 1:
+                    if demo_minute < 5:
+                        delay_ms = 100
+                    elif demo_minute < 10:
+                        delay_ms = 500
+                    elif demo_minute < 15:
+                        delay_ms = 1200
+                    elif demo_minute < 20:
+                        delay_ms = 2000
+                    else:
+                        delay_ms = 2800
+                    
+                    time.sleep(delay_ms / 1000.0)
+                    span.set_attribute("db.simulation.delay_ms", delay_ms)
+                    span.set_attribute("db.slow_query", True)
+                    span.set_attribute("db.full_table_scan", True)
+                    
+                    # Progressive failure rate: 2% → 78%
+                    if demo_minute < 5:
+                        failure_rate = 0.02
+                    elif demo_minute < 10:
+                        failure_rate = 0.10
+                    elif demo_minute < 15:
+                        failure_rate = 0.25
+                    elif demo_minute < 20:
+                        failure_rate = 0.50
+                    else:
+                        failure_rate = 0.78
+                    
+                    # Simulate failure
+                    if random.random() < failure_rate:
+                        span.set_attribute("error.type", "timeout")
+                        span.set_attribute("error.message", "Query timeout - missing index on recommendations")
+                        
+                        logger.warning(
+                            "recommendations_query_timeout",
+                            demo_minute=demo_minute,
+                            delay_ms=delay_ms,
+                            failure_rate=failure_rate,
+                            recommended_fix="CREATE INDEX idx_products_recommendations ON products(category, rating DESC)"
+                        )
+                        
+                        # Increment counters and return error
+                        with active_queries_lock:
+                            active_queries_count -= 1
+                            db_active_queries_gauge.add(-1)
+                        if conn:
+                            db_pool_active_gauge.add(-1)
+                            return_connection(conn)
+                        if token:
+                            context.detach(token)
+                        
+                        return jsonify({"error": "Query timeout - recommendations unavailable"}), 500
+            
+            # Execute slow unindexed query
+            db_name = os.getenv("DB_NAME", "productcatalog")
+            with tracer.start_as_current_span(
+                f"SELECT {db_name}.products_recommendations",
+                kind=SpanKind.CLIENT
+            ) as db_span:
+                db_span.set_attribute("db.system", "postgresql")
+                db_span.set_attribute("db.name", db_name)
+                db_span.set_attribute("db.operation", "SELECT")
+                db_span.set_attribute("db.sql.table", "products")
+                db_span.set_attribute("db.statement", "SELECT * FROM products WHERE category = %s ORDER BY RANDOM() LIMIT 5")
+                db_span.set_attribute("net.peer.name", os.getenv("DB_HOST", "postgres"))
+                db_span.set_attribute("net.peer.port", int(os.getenv("DB_PORT", "5432")))
+                db_span.set_attribute("db.user", os.getenv("DB_USER", "dbadmin"))
+                db_span.set_attribute("db.index_used", "NONE")
+                db_span.set_attribute("db.full_table_scan", True)
+                
+                cursor = conn.cursor()
+                query = """
+                    SELECT id, name, category, price, description, image_url, stock_quantity
+                    FROM products
+                    WHERE category = %s
+                    ORDER BY RANDOM()
+                    LIMIT 5
+                """
+                
+                db_query_start = time.time()
+                cursor.execute(query, (category,))
+                results = cursor.fetchall()
+                db_query_duration_ms = (time.time() - db_query_start) * 1000
+                
+                db_span.set_attribute("db.query.duration_ms", db_query_duration_ms)
+                db_span.set_attribute("db.rows_returned", len(results))
+                db_span.set_attribute("db.rows_scanned", 1000)  # Simulated full scan
+            
+            # Calculate total duration
+            query_duration_ms = (time.time() - query_start) * 1000
+            span.set_attribute("http.response.duration_ms", query_duration_ms)
+            
+            # Format results
+            recommendations = [
+                {
+                    "id": row[0],
+                    "name": row[1],
+                    "category": row[2],
+                    "price": float(row[3]) if row[3] else 0.0,
+                    "description": row[4],
+                    "image_url": row[5],
+                    "stock_quantity": row[6]
+                }
+                for row in results
+            ]
+            
+            return jsonify({"recommendations": recommendations})
+            
+        except Exception as e:
+            error_msg = str(e)
+            span.set_attribute("db.error", error_msg)
+            span.set_attribute("db.query.success", False)
+            span.record_exception(e)
+            
+            logger.error("recommendations_error", error=error_msg)
             
             return jsonify({"error": error_msg}), 500
             

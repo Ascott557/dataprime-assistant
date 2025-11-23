@@ -55,6 +55,9 @@ RECOMMENDATION_URL = os.getenv("RECOMMENDATION_URL", "http://recommendation:8011
 CURRENCY_URL = os.getenv("CURRENCY_URL", "http://currency:8018")
 SHIPPING_URL = os.getenv("SHIPPING_URL", "http://shipping:8019")
 
+# V5: Frontend orchestrator (calls all other services)
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://frontend:8018")
+
 # Load generator statistics
 load_stats = {
     "requests_sent": 0,
@@ -139,28 +142,30 @@ def generate_traffic():
                     action = random.choice(['browse', 'browse', 'browse', 'checkout'])
                     
                     if action == 'browse':
-                        # Browse products (70% of traffic)
+                        # Browse products (70% of traffic) - V5: Call Frontend orchestrator
                         req_span.set_attribute("action", "browse_products")
-                        category = random.choice(['electronics', 'furniture', 'sports'])
+                        req_span.set_attribute("traffic.type", "baseline")
+                        user_id = f"user-{random.randint(1000, 9999)}"
+                        cart_id = f"cart-{random.randint(1000, 9999)}"
                         
-                        response = requests.get(
-                            f"{PRODUCT_CATALOG_URL}/products",
-                            params={"category": category, "price_min": 0, "price_max": 1000},
+                        response = requests.post(
+                            f"{FRONTEND_URL}/api/browse",
+                            json={"user_id": user_id, "cart_id": cart_id},
                             headers=headers,
                             timeout=10
                         )
                         requests_generated += 1
                     
                     else:
-                        # Checkout attempt (30% of traffic)
+                        # Checkout attempt (30% of traffic) - V5: Call Frontend orchestrator
                         req_span.set_attribute("action", "checkout")
+                        req_span.set_attribute("traffic.type", "demo")
+                        user_id = f"user-{random.randint(1000, 9999)}"
+                        cart_id = f"cart-{random.randint(1000, 9999)}"
+                        
                         response = requests.post(
-                            f"{CHECKOUT_URL}/orders/create",
-                            json={
-                                "user_id": f"user-{random.randint(1000, 9999)}",
-                                "product_id": random.randint(1, 10),
-                                "quantity": random.randint(1, 3)
-                            },
+                            f"{FRONTEND_URL}/api/checkout",
+                            json={"user_id": user_id, "cart_id": cart_id},
                             headers=headers,
                             timeout=10
                         )

@@ -39,6 +39,10 @@ data:
   SHIPPING_URL: "http://shipping:8019"
   AD_URL: "http://ad-service:8017"
   
+  # V5 Service URLs
+  FRONTEND_URL: "http://frontend:8018"
+  PAYMENT_SERVICE_URL: "http://payment-service:8017"
+  
   # Demo Mode
   DEMO_MODE: "normal"
   
