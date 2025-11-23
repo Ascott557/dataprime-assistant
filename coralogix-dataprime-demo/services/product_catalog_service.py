@@ -327,7 +327,7 @@ def get_products():
                 db_span.set_attribute("db.name", db_name)  # Database name
                 db_span.set_attribute("db.operation", "SELECT")
                 db_span.set_attribute("db.sql.table", "products")  # Use db.sql.table (not db.table)
-                db_span.set_attribute("db.statement", "SELECT id, name, category, price, description, image_url, stock_quantity FROM products WHERE category = %s AND price BETWEEN %s AND %s ORDER BY price ASC LIMIT 10")
+                db_span.set_attribute("db.statement", "SELECT id, name, category, price, description, stock_quantity FROM products WHERE category = %s AND price BETWEEN %s AND %s ORDER BY price ASC LIMIT 10")
                 db_span.set_attribute("net.peer.name", os.getenv("DB_HOST", "postgres"))  # REQUIRED for DB Monitoring
                 db_span.set_attribute("net.peer.port", int(os.getenv("DB_PORT", "5432")))
                 db_span.set_attribute("db.user", os.getenv("DB_USER", "dbadmin"))
@@ -343,7 +343,7 @@ def get_products():
                 
                 cursor = conn.cursor()
                 query = """
-                    SELECT id, name, category, price, description, image_url, stock_quantity
+                    SELECT id, name, category, price, description, stock_quantity
                     FROM products
                     WHERE category = %s AND price BETWEEN %s AND %s
                     ORDER BY price ASC
@@ -385,8 +385,7 @@ def get_products():
                     "category": row[2],
                     "price": float(row[3]),
                     "description": row[4],
-                    "image_url": row[5],
-                    "stock_quantity": row[6]
+                    "stock_quantity": row[5]
                 }
                 for row in results
             ]
@@ -547,7 +546,7 @@ def get_product_recommendations():
                 
                 cursor = conn.cursor()
                 query = """
-                    SELECT id, name, category, price, description, image_url, stock_quantity
+                    SELECT id, name, category, price, description, stock_quantity
                     FROM products
                     WHERE category = %s
                     ORDER BY RANDOM()
@@ -575,8 +574,7 @@ def get_product_recommendations():
                     "category": row[2],
                     "price": float(row[3]) if row[3] else 0.0,
                     "description": row[4],
-                    "image_url": row[5],
-                    "stock_quantity": row[6]
+                    "stock_quantity": row[5]
                 }
                 for row in results
             ]
@@ -681,7 +679,7 @@ def search_products_unindexed():
                 db_span.set_attribute("db.name", db_name)
                 db_span.set_attribute("db.operation", "SELECT")
                 db_span.set_attribute("db.sql.table", "products")
-                db_span.set_attribute("db.statement", "SELECT id, name, category, price, description, image_url, stock_quantity FROM products WHERE description LIKE %s")
+                db_span.set_attribute("db.statement", "SELECT id, name, category, price, description, stock_quantity FROM products WHERE description LIKE %s")
                 db_span.set_attribute("net.peer.name", os.getenv("DB_HOST", "postgres"))
                 db_span.set_attribute("net.peer.port", int(os.getenv("DB_PORT", "5432")))
                 db_span.set_attribute("db.user", os.getenv("DB_USER", "dbadmin"))
@@ -702,7 +700,7 @@ def search_products_unindexed():
                 
                 cursor = conn.cursor()
                 query = """
-                    SELECT id, name, category, price, description, image_url, stock_quantity
+                    SELECT id, name, category, price, description, stock_quantity
                     FROM products
                     WHERE description LIKE %s
                 """
@@ -742,8 +740,7 @@ def search_products_unindexed():
                     "category": row[2],
                     "price": float(row[3]),
                     "description": row[4],
-                    "image_url": row[5],
-                    "stock_quantity": row[6]
+                    "stock_quantity": row[5]
                 }
                 for row in results
             ]
@@ -1070,13 +1067,13 @@ def get_popular_products_with_history():
                 query = """
                     SELECT 
                         p.id, p.name, p.category, p.price, p.description,
-                        p.image_url, p.stock_quantity,
+                        p.stock_quantity,
                         COUNT(o.id) as total_orders,
                         COALESCE(SUM(o.quantity), 0) as total_quantity_sold,
                         MAX(o.order_date) as last_order_date
                     FROM products p
                     LEFT JOIN orders o ON p.id = o.product_id
-                    GROUP BY p.id, p.name, p.category, p.price, p.description, p.image_url, p.stock_quantity
+                    GROUP BY p.id, p.name, p.category, p.price, p.description, p.stock_quantity
                     ORDER BY total_orders DESC
                     LIMIT %s
                 """
@@ -1116,12 +1113,11 @@ def get_popular_products_with_history():
                     "category": row[2],
                     "price": float(row[3]),
                     "description": row[4],
-                    "image_url": row[5],
-                    "stock_quantity": row[6],
+                    "stock_quantity": row[5],
                     "popularity": {
-                        "total_orders": row[7],
-                        "total_quantity_sold": int(row[8]),
-                        "last_order_date": row[9].isoformat() if row[9] else None
+                        "total_orders": row[6],
+                        "total_quantity_sold": int(row[7]),
+                        "last_order_date": row[8].isoformat() if row[8] else None
                     }
                 }
                 for row in results
